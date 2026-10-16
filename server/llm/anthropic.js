@@ -3,6 +3,7 @@
 // signatures included) and only ever appended to.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { format, i18nError } from '../../shared/i18n.js';
 
 export function createAnthropicClient(cfg) {
   return cfg.apiKey ? new Anthropic({ apiKey: cfg.apiKey }) : new Anthropic();
@@ -23,7 +24,7 @@ export function closingMessage(text) {
 }
 
 // Runs one user turn. Returns the provider-format messages to append.
-export async function runAnthropicTurn({ client, cfg, system, history, userBlocks, tools, runTool, emit, signal, maxIterations }) {
+export async function runAnthropicTurn({ client, cfg, system, history, userBlocks, tools, runTool, emit, signal, maxIterations, say = format }) {
   const turn = [{ role: 'user', content: userBlocks.map((text) => ({ type: 'text', text })) }];
   let textSoFar = '';
   let stopReason = null;
@@ -69,16 +70,16 @@ export async function runAnthropicTurn({ client, cfg, system, history, userBlock
       // retry that turn a couple of times. Everything else is rethrown.
       const jsonError = err instanceof Anthropic.AnthropicError && !(err instanceof Anthropic.APIError) && /parse tool parameter JSON/i.test(err.message);
       if (!jsonError || signal?.aborted || jsonRetries++ >= 2) throw err;
-      emit('notice', { message: 'Retrying a malformed tool call…' });
+      emit('notice', { message: say('Retrying a malformed tool call…') });
       continue;
     }
 
     stopReason = msg.stop_reason;
     if (stopReason === 'refusal') {
-      throw Object.assign(new Error('The model declined this request. Try rephrasing it.'), { status: 422 });
+      throw i18nError(422, 'The model declined this request. Try rephrasing it.');
     }
     const toolUses = msg.content.filter((b) => b.type === 'tool_use');
-    if (stopReason === 'max_tokens' && toolUses.length) throw new Error('A tool call was cut off (max_tokens). Try a narrower request.');
+    if (stopReason === 'max_tokens' && toolUses.length) throw i18nError(502, 'A tool call was cut off (max_tokens). Try a narrower request.');
     turn.push({ role: 'assistant', content: msg.content });
     if (stopReason === 'pause_turn') continue;
     if (!toolUses.length) break;
@@ -90,7 +91,7 @@ export async function runAnthropicTurn({ client, cfg, system, history, userBlock
       results.push({ type: 'tool_result', tool_use_id: tu.id, content: r.content, ...(r.error ? { is_error: true } : {}) });
     }
     turn.push({ role: 'user', content: results });
-    if (i === maxIterations - 1) emit('notice', { message: 'Stopped after several tool rounds.' });
+    if (i === maxIterations - 1) emit('notice', { message: say('Stopped after several tool rounds.') });
   }
   return { messages: turn, stopReason };
 }

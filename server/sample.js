@@ -1,9 +1,28 @@
 // An original sample story, seeded on first run so every infographic has
 // something to show. Delete it from the library whenever you like.
 
-import { newCharacter, newStory } from '../shared/model.js';
+import { newCharacter, newStory, setPath } from '../shared/model.js';
+import SAMPLE_IT from './sample-it.js';
 
-export function sampleData() {
+// Translations of the sample's text, keyed by path ("story.title",
+// "characters.char_mara.concept.logline", …). Option ids stay as they are.
+const SAMPLE_TEXT = { it: SAMPLE_IT };
+
+export function sampleData(lang = 'en') {
+  const data = englishSample();
+  const text = SAMPLE_TEXT[lang];
+  if (text) {
+    const byId = { story: data.stories[0], ...Object.fromEntries(data.characters.map((c) => [`characters.${c.id}`, c])) };
+    for (const [path, value] of Object.entries(text)) {
+      const [, root, rest] = path.match(/^(story|characters\.[^.]+)\.(.+)$/) || [];
+      if (byId[root]) setPath(byId[root], rest, value);
+    }
+  }
+  data.stories[0].sampleLang = text ? lang : 'en';
+  return data;
+}
+
+function englishSample() {
   const story = newStory({
     id: 'story_undertow',
     title: 'Undertow',

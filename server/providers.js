@@ -7,6 +7,8 @@
 // settings first, then from environment variables (<PREFIX>_API_KEY,
 // <PREFIX>_BASE_URL, <PREFIX>_MODEL), then from the defaults below.
 
+import { i18nError } from '../shared/i18n.js';
+
 const p = (id, label, fields) => ({
   id,
   label,
@@ -123,7 +125,7 @@ function savedFor(settings, id) {
 
 export function resolveProvider(settings, id) {
   const def = PROVIDER_BY_ID[id];
-  if (!def) throw Object.assign(new Error(`Unknown AI provider "${id}"`), { status: 400 });
+  if (!def) throw i18nError(400, 'Unknown AI provider “{id}”', { id });
   const saved = savedFor(settings, id);
   const env = envKey(def);
   const apiKey = saved.apiKey || env?.value || '';

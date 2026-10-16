@@ -5,6 +5,7 @@
 import * as K from './catalog.js';
 import { SECTIONS, sectionFields } from './sections.js';
 import { getPath, isFilled, isPlainObject, displayName } from './model.js';
+import { t } from './i18n.js';
 
 const EXPLICIT_KEYS = K.EXPLICIT_TRAITS.map((t) => t.id);
 const MAJOR = new Set(['protagonist', 'first']);
@@ -154,7 +155,11 @@ export function similarity(a, b) {
 
 // ── McKee checks ────────────────────────────────────────────────────────
 
-const check = (level, section, title, detail, ref) => ({ level, section, title, detail, ref, id: `${section}:${title}` });
+// Titles and details are English keys, shown in the active language; the id
+// stays English so it is stable across languages.
+const check = (level, section, title, detail, ref) => ({
+  level, section, title: t(title), detail: t(detail), ref: ref.replace(/^Ch\./, t('Ch.')), id: `${section}:${title}`,
+});
 
 export function characterChecks(c, story, cast = []) {
   const out = [];
@@ -172,25 +177,25 @@ export function characterChecks(c, story, cast = []) {
   if (isProt) {
     if (!isFilled(c.cast?.centerOfGood)) out.push(check('warn', 'role', 'Locate the Center of Good', 'The audience searches the story for a positive charge to attach its empathy to — usually in the protagonist.', 'Ch. 6'));
     const ess = (c.cast?.essentials || []).length;
-    if (ess >= 7) out.push(check('good', 'role', 'Protagonist essentials covered', `${ess} of 8 essentials checked.`, 'Ch. 6'));
-    else if (ess < 5) out.push(check('tip', 'role', 'Protagonist essentials', `${ess}/8 checked. Willpower, capability, underdog status, empathy, intrigue, depth, capacity for change and insight make a lead worth the audience’s time.`, 'Ch. 6'));
+    if (ess >= 7) out.push(check('good', 'role', 'Protagonist essentials covered', t('{n} of 8 essentials checked.', { n: ess }), 'Ch. 6'));
+    else if (ess < 5) out.push(check('tip', 'role', 'Protagonist essentials', t('{n}/8 checked. Willpower, capability, underdog status, empathy, intrigue, depth, capacity for change and insight make a lead worth the audience’s time.', { n: ess }), 'Ch. 6'));
   }
 
   // Explicit traits & the 3/10 rule
   const td = traitDensity(c);
-  if (major && td.known < 4) out.push(check('tip', 'explicit', 'Thin characterization', `Only ${td.known} explicit traits known. Credibility begins with characterization — follow her around 24/7.`, 'Ch. 7'));
+  if (major && td.known < 4) out.push(check('tip', 'explicit', 'Thin characterization', t('Only {n} explicit traits known. Credibility begins with characterization — follow her around 24/7.', { n: td.known }), 'Ch. 7'));
   if (td.known >= 5 && td.expressedRatio > 0.6) {
-    out.push(check('tip', 'explicit', 'Leave seven-tenths unknown', `You plan to dramatize ${Math.round(td.expressedRatio * 100)}% of what you know. McKee suggests expressing about three-tenths and letting the audience fill in the rest.`, 'Ch. 7'));
+    out.push(check('tip', 'explicit', 'Leave seven-tenths unknown', t('You plan to dramatize {pct}% of what you know. McKee suggests expressing about three-tenths and letting the audience fill in the rest.', { pct: Math.round(td.expressedRatio * 100) }), 'Ch. 7'));
   }
   if (isProt && td.expressed === 1) out.push(check('warn', 'explicit', 'One lone trait', 'A single expressed trait (a foreign accent, say) shrinks a character to a bit part.', 'Ch. 7'));
   if (td.known >= 5 && td.expressedRatio >= 0.2 && td.expressedRatio <= 0.45) {
-    out.push(check('good', 'explicit', 'Trait density near 3/10', `${td.expressed} of ${td.known} known traits dramatized.`, 'Ch. 7'));
+    out.push(check('good', 'explicit', 'Trait density near 3/10', t('{shown} of {known} known traits dramatized.', { shown: td.expressed, known: td.known }), 'Ch. 7'));
   }
 
   // Four selves
   if (major) {
     const filledSelves = K.SELF_LEVELS.filter((s) => isFilled(c.selves?.[s.id])).length;
-    if (filledSelves > 0 && filledSelves < 4) out.push(check('tip', 'selves', 'Complete the four selves', `${filledSelves}/4 levels defined. Major characters should be known socially, personally, privately and in the hidden self.`, 'Ch. 5'));
+    if (filledSelves > 0 && filledSelves < 4) out.push(check('tip', 'selves', 'Complete the four selves', t('{n}/4 levels defined. Major characters should be known socially, personally, privately and in the hidden self.', { n: filledSelves }), 'Ch. 5'));
     if (filledSelves === 4) out.push(check('good', 'selves', 'Known at all four levels', 'Social, personal, core and hidden selves are defined.', 'Ch. 5'));
   }
 
@@ -215,16 +220,16 @@ export function characterChecks(c, story, cast = []) {
     out.push(check('tip', 'choice', 'Options look alike', 'The two horns of the dilemma read almost the same. Sharpen what each costs.', 'Ch. 8'));
   }
   const depth = choiceDepth(c);
-  if (isProt && depth != null && depth < 5) out.push(check('tip', 'choice', 'Raise the stakes of the crisis', `Choice depth ${depth}/10. The greater the risk — and the freer the choice — the deeper and truer it is.`, 'Ch. 8'));
+  if (isProt && depth != null && depth < 5) out.push(check('tip', 'choice', 'Raise the stakes of the crisis', t('Choice depth {n}/10. The greater the risk — and the freer the choice — the deeper and truer it is.', { n: depth }), 'Ch. 8'));
 
   // Dimensions
-  if (isProt && dims.length < 3) out.push(check('warn', 'dimensions', 'Protagonist needs dimensions', `${dims.length} dimension(s). The protagonist should carry the majority of the cast’s contradictions — often more than three.`, 'Ch. 9, 17'));
+  if (isProt && dims.length < 3) out.push(check('warn', 'dimensions', 'Protagonist needs dimensions', t('{n} dimension(s). The protagonist should carry the majority of the cast’s contradictions — often more than three.', { n: dims.length }), 'Ch. 9, 17'));
   if (circle === 'first' && dims.length === 0) out.push(check('tip', 'dimensions', 'Give her a dimension', 'First-circle roles generally feature one or two dimensions.', 'Ch. 9'));
   if (['second', 'third'].includes(circle) && dims.length > 1) out.push(check('tip', 'dimensions', 'Too dimensional for the orbit', 'Dimensions consume storytelling time. Limit second-circle roles to their distinctive traits, or promote her.', 'Ch. 6, 17'));
   const definers = dims.filter((d) => d.defining);
   if (dims.length >= 2 && definers.length === 0) out.push(check('warn', 'dimensions', 'Choose a defining dimension', 'One contradiction should stand forward — the one without which she would vanish.', 'Ch. 9'));
   if (definers.length > 1) out.push(check('warn', 'dimensions', 'More than one defining dimension', 'Only one dimension defines her essential spirit; the others complete the portrait.', 'Ch. 9'));
-  if (definers.length === 1 && dims.length >= 3) out.push(check('good', 'dimensions', 'Defining dimension set', `${definers[0].positive || '?'} / ${definers[0].negative || '?'} anchors ${dims.length} dimensions.`, 'Ch. 9'));
+  if (definers.length === 1 && dims.length >= 3) out.push(check('good', 'dimensions', 'Defining dimension set', t('{pos} / {neg} anchors {n} dimensions.', { pos: definers[0].positive || '?', neg: definers[0].negative || '?', n: dims.length }), 'Ch. 9'));
   for (const d of dims) {
     if (!isFilled(d.positive) || !isFilled(d.negative)) {
       out.push(check('warn', 'dimensions', 'Half a dimension', 'A dimension needs both poles of the contradiction.', 'Ch. 9'));
@@ -238,9 +243,9 @@ export function characterChecks(c, story, cast = []) {
   // Antagonism
   const ap = antagonismProfile(c);
   if (isProt && ap.underdog === false) {
-    out.push(check('warn', 'complexity', 'Not an underdog', `Capacity ${ap.capacity} vs. antagonism ${ap.power}. The forces of antagonism should virtually overwhelm her — she should have only a chance.`, 'Ch. 6'));
+    out.push(check('warn', 'complexity', 'Not an underdog', t('Capacity {capacity} vs. antagonism {power}. The forces of antagonism should virtually overwhelm her — she should have only a chance.', { capacity: ap.capacity, power: ap.power }), 'Ch. 6'));
   }
-  if (isProt && ap.underdog === true) out.push(check('good', 'complexity', 'Underdog confirmed', `Antagonism ${ap.power} outweighs capacity ${ap.capacity}.`, 'Ch. 6'));
+  if (isProt && ap.underdog === true) out.push(check('good', 'complexity', 'Underdog confirmed', t('Antagonism {power} outweighs capacity {capacity}.', { power: ap.power, capacity: ap.capacity }), 'Ch. 6'));
   if (major && ap.power > 0 && ap.levelsEngaged < 2) {
     out.push(check('tip', 'complexity', 'Conflict on one level only', 'The more various the antagonisms, the more diverse her choices — and the more complex her nature.', 'Ch. 10'));
   }
@@ -251,7 +256,7 @@ export function characterChecks(c, story, cast = []) {
     out.push(check('warn', 'complexity', 'Desires don’t contradict', 'If the subconscious wants what the conscious mind wants, who would notice? Make them collide.', 'Ch. 10'));
   }
   const dt = (c.complexity?.depthTraits || []).length;
-  if (dt >= 6) out.push(check('good', 'complexity', 'Depth of character', `${dt}/10 depth traits — antihero territory.`, 'Ch. 10'));
+  if (dt >= 6) out.push(check('good', 'complexity', 'Depth of character', t('{n}/10 depth traits — antihero territory.', { n: dt }), 'Ch. 10'));
 
   // Arc
   const arc = c.arc || {};
@@ -275,10 +280,10 @@ export function characterChecks(c, story, cast = []) {
   const storyGenres = (story?.genre?.primary || []).map((id) => K.PRIMARY_GENRES.find((g) => g.id === id)).filter(Boolean);
   const characterPlot = storyGenres.find((g) => g.family === 'character');
   if (isProt && characterPlot && arc.type === 'revealed') {
-    out.push(check('tip', 'arc', 'Genre expects change', `${characterPlot.label} arcs the protagonist’s ${characterPlot.quality?.toLowerCase()}. A revealed-only arc fights the genre.`, 'Ch. 14'));
+    out.push(check('tip', 'arc', 'Genre expects change', t('{genre} arcs the protagonist’s {quality}. A revealed-only arc fights the genre.', { genre: characterPlot.label, quality: characterPlot.quality?.toLowerCase() }), 'Ch. 14'));
   }
   if (isProt && characterPlot?.arc && ['positive', 'negative'].includes(arc.type) && characterPlot.arc !== arc.type) {
-    out.push(check('tip', 'arc', 'Arc direction vs. genre', `${characterPlot.label} implies a ${characterPlot.arc} arc.`, 'Ch. 14'));
+    out.push(check('tip', 'arc', 'Arc direction vs. genre', characterPlot.arc === 'positive' ? t('{genre} implies a positive arc.', { genre: characterPlot.label }) : t('{genre} implies a negative arc.', { genre: characterPlot.label }), 'Ch. 14'));
   }
 
   // Symbolic
@@ -293,7 +298,7 @@ export function characterChecks(c, story, cast = []) {
 
   // Genre
   if (storyGenres.length && !isFilled(c.genre?.coreCastRole) && major) {
-    out.push(check('tip', 'genre', 'Core-cast position', `The story is ${storyGenres.map((g) => g.label).join(' + ')}. Which core-cast role does she play?`, 'Ch. 14'));
+    out.push(check('tip', 'genre', 'Core-cast position', t('The story is {genres}. Which core-cast role does she play?', { genres: storyGenres.map((g) => g.label).join(' + ') }), 'Ch. 14'));
   }
 
   // Action
@@ -324,7 +329,7 @@ export function characterChecks(c, story, cast = []) {
     for (const r of rels) if (r.dimensionId) activated.add(r.dimensionId);
     const dormant = dims.filter((d) => !activated.has(d.id));
     if (dormant.length) {
-      out.push(check('tip', 'relationships', 'Dormant dimensions', `${dormant.length} dimension(s) aren’t drawn out by any relationship — e.g. ${dormant[0].positive || '?'}/${dormant[0].negative || '?'}. Map a cast member to each, as Austen does with the Bennet sisters.`, 'Ch. 17'));
+      out.push(check('tip', 'relationships', 'Dormant dimensions', t('{n} dimension(s) aren’t drawn out by any relationship — e.g. {pos}/{neg}. Map a cast member to each, as Austen does with the Bennet sisters.', { n: dormant.length, pos: dormant[0].positive || '?', neg: dormant[0].negative || '?' }), 'Ch. 17'));
     }
   }
   return out;
@@ -340,7 +345,7 @@ export function castChecks(story, cast) {
     const pd = (p.dimensions || []).length;
     if (pd < maxDims) {
       const rival = cast.find((c) => (c.dimensions || []).length === maxDims);
-      out.push(check('warn', 'cast', 'Protagonist out-dimensioned', `${displayName(rival)} has more dimensions (${maxDims}) than ${displayName(p)} (${pd}). Overly interesting supporting roles may mutiny and take over the telling.`, 'Ch. 6, 17'));
+      out.push(check('warn', 'cast', 'Protagonist out-dimensioned', t('{rival} has more dimensions ({max}) than {lead} ({n}). Overly interesting supporting roles may mutiny and take over the telling.', { rival: displayName(rival), max: maxDims, lead: displayName(p), n: pd }), 'Ch. 6, 17'));
     }
   }
   if (!cast.some((c) => c.cast?.circle === 'first')) out.push(check('tip', 'cast', 'Empty first circle', 'Major supporting and servicing players orbit closest to the protagonist.', 'Ch. 6, 17'));
@@ -351,7 +356,7 @@ export function castChecks(story, cast) {
   for (const c of cast) {
     const key = `${c.cast?.circle}|${(c.concept?.roleLabel || '').trim().toLowerCase()}`;
     if (!c.concept?.roleLabel) continue;
-    if (seen.has(key)) out.push(check('tip', 'cast', 'Two roles in one position', `${displayName(seen.get(key))} and ${displayName(c)} share role and orbit. No two should take the same position nor perform the same tasks the same way.`, 'Ch. 6'));
+    if (seen.has(key)) out.push(check('tip', 'cast', 'Two roles in one position', t('{a} and {b} share role and orbit. No two should take the same position nor perform the same tasks the same way.', { a: displayName(seen.get(key)), b: displayName(c) }), 'Ch. 6'));
     else seen.set(key, c);
   }
   if (story && !(story.genre?.primary || []).length) out.push(check('tip', 'cast', 'Choose the story’s genre', 'Genre conventions shape the core cast and what the audience expects.', 'Ch. 14'));

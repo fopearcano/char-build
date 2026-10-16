@@ -11,6 +11,9 @@ interview. It runs on Claude, OpenAI, Gemini, OpenRouter, Mistral, Groq,
 DeepSeek, xAI, a local Ollama or LM Studio model, or any OpenAI-compatible
 server.
 
+The whole app is available in **English and Italian** (*italiano*): pick the
+language from the menu in the top-right corner.
+
 ![Builder — station 09, Dimensions](docs/screenshots/builder.png)
 
 ## Quick start
@@ -170,6 +173,37 @@ Implementation notes:
 
 Without a key, everything except the Coach and Interview tabs works.
 
+## Languages
+
+CharBuild speaks **English** and **Italian**. The globe menu in the top-right
+corner of every page switches language on the spot; the choice is remembered
+in the browser, and the first visit follows the browser’s language.
+
+![The builder in Italian, with the language menu open](docs/screenshots/italian.png)
+
+* **Everything is translated:** the sixteen stations (principles, questions,
+  fields, hints), McKee’s catalog of options, the infographics, the McKee
+  checks, the Markdown export, the coach drawer and its settings, and the
+  server’s messages.
+* **Your data doesn’t change.** Only labels are translated; saved values and
+  option ids are the same in every language, so you can switch at any time.
+* **The coach follows you.** When the interface is in Italian the coach and the
+  interview answer in Italian (proposed field values included), and refer to the
+  stations by their Italian names. Switching language mid-conversation is fine.
+* **The book stays in English.** It is your own copy of the original edition.
+  Italian searches are matched to McKee’s English vocabulary (*dimensione
+  definitoria* → *defining dimension*, *incidente scatenante* → *inciting
+  incident*…), and passages are shown as written.
+* **The sample story is translated too.** In Italian it is *Risacca*. The
+  library offers to swap the sample to the current language; on first run the
+  sample follows `CHARBUILD_LANG` (or the host’s `LANG`).
+
+Translations live in `shared/locales/it/` (`data.js` for the builder data,
+`ui.js` for the interface). English strings are the keys. Run
+`node scripts/i18n-keys.mjs` to list anything untranslated; the test suite fails
+if a string is missing. To add a language, register it in `shared/i18n.js`
+(`LOCALES`) and add `shared/locales/<id>.js`.
+
 ## The book
 
 The epub in `docs/` is parsed **at runtime**. It is split into about 600
@@ -197,6 +231,7 @@ guidance is paraphrased, with chapter references. You can point
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | — | Optional. Each provider’s key, see [Providers](#providers). You can also set them in the app. |
 | `<PREFIX>_MODEL`, `<PREFIX>_BASE_URL` | per provider | For example `OPENAI_MODEL` or `OLLAMA_BASE_URL`. Settings saved in the app take precedence. |
 | `BOOK_PATH` | first `.epub` in `docs/` | |
+| `CHARBUILD_LANG` | host `LANG`, else `en` | Language of the sample story seeded on first run (`en` or `it`). The interface language is chosen in the app. |
 
 ## Project layout
 
@@ -204,7 +239,8 @@ guidance is paraphrased, with chapter references. You can point
 server/   Express app (index.js), JSON store, coach (ai.js), provider registry (providers.js),
           agent loops per API (llm/anthropic.js, llm/openai.js), epub search (book.js), sample seed
 shared/   Used by both browser and server: McKee catalog, the 16 stations, data model,
-          field index and validation, analysis and checks, Markdown export
+          field index and validation, analysis and checks, Markdown export,
+          i18n (i18n.js, i18n-data.js) and the Italian dictionaries (locales/)
 public/   Single-page app (plain ES modules, no build step): app.js, forms.js, viz.js,
           castmap.js, assistant.js, css/app.css
 test/     node:test suites: the agent loops against scripted fake clients, and the real OpenAI SDK

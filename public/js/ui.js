@@ -1,5 +1,7 @@
 // Small UI toolkit: escaping, icons, toasts, modals, markdown-lite, misc.
 
+import { t, getLocale } from '/shared/i18n.js';
+
 export const esc = (v) => String(v ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -8,6 +10,11 @@ export const esc = (v) => String(v ?? '')
   .replace(/'/g, '&#39;');
 
 export const attr = (v) => esc(v);
+
+// Translate, escape, then fill {placeholders} with ready-made HTML.
+export function tHtml(key, htmlVars = {}) {
+  return esc(t(key)).replace(/\{(\w+)\}/g, (m, k) => (k in htmlVars ? String(htmlVars[k]) : m));
+}
 
 const P = {
   home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/>',
@@ -45,6 +52,7 @@ const P = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/>',
 };
 
 export function icon(name, cls = '') {
@@ -85,12 +93,12 @@ export function toast(message, kind = 'info', ms = 3200) {
 }
 
 // Promise-based modal. `body` is HTML; buttons: [{label, value, kind}]
-export function modal({ title, body, buttons = [{ label: 'OK', value: true, kind: 'primary' }], wide = false, onMount }) {
+export function modal({ title, body, buttons = [{ label: t('OK'), value: true, kind: 'primary' }], wide = false, onMount }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
     wrap.className = 'modal-backdrop';
     wrap.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${attr(title)}">
-      <header><h2>${esc(title)}</h2><button class="icon-btn" data-close aria-label="Close">${icon('x')}</button></header>
+      <header><h2>${esc(title)}</h2><button class="icon-btn" data-close aria-label="${attr(t('Close'))}">${icon('x')}</button></header>
       <div class="modal-body">${body}</div>
       <footer>${buttons.map((b, i) => `<button class="btn ${b.kind || ''}" data-btn="${i}">${esc(b.label)}</button>`).join('')}</footer>
     </div>`;
@@ -117,11 +125,11 @@ export function modal({ title, body, buttons = [{ label: 'OK', value: true, kind
   });
 }
 
-export async function confirmDialog(title, message, okLabel = 'Delete') {
+export async function confirmDialog(title, message, okLabel = t('Delete')) {
   return modal({
     title,
     body: `<p>${esc(message)}</p>`,
-    buttons: [{ label: 'Cancel', value: false }, { label: okLabel, value: true, kind: 'danger' }],
+    buttons: [{ label: t('Cancel'), value: false }, { label: okLabel, value: true, kind: 'danger' }],
   });
 }
 
@@ -129,7 +137,7 @@ export async function promptDialog(title, label, value = '') {
   return modal({
     title,
     body: `<label class="field"><span class="lbl">${esc(label)}</span><input class="inp" id="prompt-input" value="${attr(value)}"></label>`,
-    buttons: [{ label: 'Cancel', value: null }, { label: 'OK', value: (w) => w.querySelector('#prompt-input').value, kind: 'primary' }],
+    buttons: [{ label: t('Cancel'), value: null }, { label: t('OK'), value: (w) => w.querySelector('#prompt-input').value, kind: 'primary' }],
     onMount: (w) => {
       const inp = w.querySelector('#prompt-input');
       inp.addEventListener('keydown', (e) => {
@@ -197,10 +205,10 @@ export function initials(name) {
 export function timeAgo(iso) {
   if (!iso) return '';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString();
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{n} min ago', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('{n} h ago', { n: Math.floor(s / 3600) });
+  return new Date(iso).toLocaleDateString(getLocale());
 }
 
 export function autoGrow(el) {

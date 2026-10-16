@@ -6,6 +6,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
+import { tr, format } from '../shared/i18n.js';
+import { expandItalianQuery } from './book-terms.js';
 
 const STOP = new Set(('a an and are as at be but by for from has have he her hers him his i if in into is it its me my no not of on or our she so than that the their them then there these they this to us was we were what when which who whom why will with would you your yours can could did do does done had how just more most much must only other over own same should some such too very about after again all also am any because been before being below between both down during each few further here itself let nor off once out shall since through under until up upon while yet').split(/\s+/));
 
@@ -188,27 +190,32 @@ export function getBookIndex(rootDir) {
   if (cached) return cached;
   const file = findBookFile(rootDir);
   if (!file) {
-    cached = { available: false, reason: 'No .epub found in docs/ (or BOOK_PATH).' };
+    cached = { available: false, reasonKey: 'No .epub found in docs/ (or BOOK_PATH).' };
     return cached;
   }
   try {
     const { title, passages } = parseEpub(file);
     cached = { available: true, file: path.basename(file), title, index: new BookIndex(passages, title), passages: passages.length };
   } catch (err) {
-    cached = { available: false, reason: `Could not read ${path.basename(file)}: ${err.message}` };
+    cached = { available: false, reasonKey: 'Could not read {file}: {error}', reasonVars: { file: path.basename(file), error: err.message } };
   }
   return cached;
 }
 
-export function bookStatus(rootDir) {
+const reasonOf = (b, lang) => (lang ? tr(lang, b.reasonKey, b.reasonVars) : format(b.reasonKey, b.reasonVars));
+
+export function bookStatus(rootDir, lang) {
   const b = getBookIndex(rootDir);
-  return b.available ? { available: true, file: b.file, title: b.title, passages: b.passages } : { available: false, reason: b.reason };
+  return b.available ? { available: true, file: b.file, title: b.title, passages: b.passages } : { available: false, reason: reasonOf(b, lang) };
 }
 
-export function searchBook(rootDir, query, limit = 5, maxChars = 1400) {
+// `lang` is the searcher's language: Italian queries also look for McKee's
+// English terms (the book itself is in English).
+export function searchBook(rootDir, query, limit = 5, maxChars = 1400, lang = 'en') {
   const b = getBookIndex(rootDir);
-  if (!b.available) return { available: false, reason: b.reason, results: [] };
-  const results = b.index.search(query, limit).map((r) => ({
+  if (!b.available) return { available: false, reason: reasonOf(b, lang), results: [] };
+  const q = lang === 'it' ? expandItalianQuery(query) : query;
+  const results = b.index.search(q, limit).map((r) => ({
     chapter: r.chapter,
     section: r.section,
     score: r.score,

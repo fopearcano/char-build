@@ -13,6 +13,8 @@ import { createAI, publicChat } from './ai.js';
 import { bookStatus, searchBook } from './book.js';
 import { characterMarkdown } from '../shared/export.js';
 import { displayName } from '../shared/model.js';
+import { tr, localizeError, DEFAULT_LOCALE } from '../shared/i18n.js';
+import { requestLang, hostLang, withLocale } from './i18n.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '..');
@@ -30,15 +32,17 @@ export function lanAddresses() {
     .map((i) => i.address);
 }
 
-export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ROOT, 'data'), seed = true, makeClient, rootDir = ROOT, allowRemoteSettings = process.env.ALLOW_REMOTE_SETTINGS === '1' } = {}) {
-  const store = await new Store(dataDir).init({ seed: seed ? sampleData : null });
+export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ROOT, 'data'), seed = true, seedLang = hostLang(), makeClient, rootDir = ROOT, allowRemoteSettings = process.env.ALLOW_REMOTE_SETTINGS === '1' } = {}) {
+  const store = await new Store(dataDir).init({ seed: seed ? () => sampleData(seedLang) : null });
   const ai = createAI({ store, rootDir, makeClient });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '5mb' }));
 
-  // Basic hardening: same-origin JSON API, no framing.
+  // Basic hardening: same-origin JSON API, no framing. Every request also
+  // gets the writer's interface language for messages it returns.
   app.use((req, res, next) => {
+    req.lang = requestLang(req);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -56,7 +60,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   // The app is reachable from the whole LAN, so only the host machine may
   // change the API key / model (unless ALLOW_REMOTE_SETTINGS=1).
   const canEditSettings = (req) => allowRemoteSettings || isLoopback(req);
-  const aiStatus = (req) => ({ ...ai.status(), canEditSettings: canEditSettings(req) });
+  const aiStatus = (req) => ({ ...ai.status(req.lang), canEditSettings: canEditSettings(req) });
 
   app.get('/api/bootstrap', (req, res) => {
     res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req) });
@@ -80,7 +84,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   app.get('/api/characters/:id/markdown', (req, res) => {
     const c = store.getCharacter(idParam(req));
     const story = c.storyId ? store.data.stories.find((s) => s.id === c.storyId) : null;
-    const md = characterMarkdown(c, story, store.listCharacters(c.storyId));
+    const md = withLocale(req.lang, () => characterMarkdown(c, story, store.listCharacters(c.storyId)));
     const file = `${displayName(c).replace(/[^\w-]+/g, '_') || 'character'}.md`;
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
@@ -94,7 +98,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   });
   app.post('/api/import', wrap(async (req, res) => res.json(await store.importData(req.body?.data, req.body?.mode))));
   app.post('/api/reset-sample', wrap(async (req, res) => {
-    const sample = sampleData();
+    const sample = sampleData(req.lang);
     res.json(await store.importData(sample, 'merge'));
   }));
 
@@ -109,20 +113,20 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   }));
 
   // Book
-  app.get('/api/book/status', (req, res) => res.json(bookStatus(rootDir)));
+  app.get('/api/book/status', (req, res) => res.json(bookStatus(rootDir, req.lang)));
   app.get('/api/book/search', (req, res) => {
     const q = String(req.query.q || '').slice(0, 300);
     const limit = Math.max(1, Math.min(10, Number(req.query.limit) || 6));
-    res.json(searchBook(rootDir, q, limit, 900));
+    res.json(searchBook(rootDir, q, limit, 900, req.lang));
   });
 
   // AI
   app.post('/api/ai/test', wrap(async (req, res) => {
     try {
-      res.json(await ai.test(req.body?.provider));
+      res.json(await ai.test(req.body?.provider, req.lang));
     } catch (err) {
       if (err.status === 400 && !isApiError(err)) throw err;
-      res.status(200).json({ ok: false, error: friendlyError(err) });
+      res.status(200).json({ ok: false, error: friendlyError(err, req.lang) });
     }
   }));
   app.get('/api/ai/models', wrap(async (req, res) => {
@@ -130,7 +134,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
       res.json({ models: await ai.listModels(req.query.provider) });
     } catch (err) {
       if (err.status === 400 && !isApiError(err)) throw err;
-      res.status(502).json({ error: friendlyError(err) });
+      res.status(502).json({ error: friendlyError(err, req.lang) });
     }
   }));
 
@@ -151,12 +155,12 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
 
   app.post('/api/ai/chat', async (req, res) => {
     const { conversationId, mode, characterId, message, section } = req.body || {};
-    if (conversationId && !validId(conversationId)) return res.status(400).json({ error: 'Invalid conversation id' });
-    if (!conversationId && !validId(characterId)) return res.status(400).json({ error: 'characterId required' });
+    if (conversationId && !validId(conversationId)) return res.status(400).json({ error: tr(req.lang, 'Invalid conversation id') });
+    if (!conversationId && !validId(characterId)) return res.status(400).json({ error: tr(req.lang, 'characterId required') });
     try {
       if (!conversationId) store.getCharacter(characterId);
     } catch (err) {
-      return res.status(err.status || 500).json({ error: err.message });
+      return res.status(err.status || 500).json({ error: localizeError(err, req.lang) });
     }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -173,9 +177,9 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
     };
     const ping = setInterval(() => emit('ping', {}), 15000);
     try {
-      await ai.chat({ conversationId, mode, characterId, message, section }, emit, controller.signal);
+      await ai.chat({ conversationId, mode, characterId, message, section, lang: req.lang }, emit, controller.signal);
     } catch (err) {
-      if (!controller.signal.aborted) emit('error', { message: friendlyError(err) });
+      if (!controller.signal.aborted) emit('error', { message: friendlyError(err, req.lang) });
     } finally {
       clearInterval(ping);
       res.end();
@@ -191,7 +195,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     const status = err.status || err.statusCode || 500;
     if (status >= 500) console.error('[server]', err);
-    res.status(status).json({ error: status >= 500 ? 'Internal error' : err.message });
+    res.status(status).json({ error: status >= 500 ? tr(req.lang, 'Internal error') : localizeError(err, req.lang) });
   });
 
   return { app, store, ai };
@@ -199,28 +203,32 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
 
 const isApiError = (err) => err instanceof Anthropic.APIError || err instanceof OpenAI.APIError;
 
-// Turn SDK errors from any provider into a message a writer can act on.
-function friendlyError(err) {
+// Turn SDK errors from any provider into a message a writer can act on, in
+// the writer's language.
+function friendlyError(err, lang = DEFAULT_LOCALE) {
   const cfg = err?.provider;
-  const who = cfg?.label || 'The AI provider';
+  const who = cfg?.label ? tr(lang, cfg.label) : tr(lang, 'The AI provider');
+  const say = (key, vars) => tr(lang, key, { provider: who, ...vars });
   const connection = err instanceof Anthropic.APIConnectionError || err instanceof OpenAI.APIConnectionError || /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed/i.test(err?.message || '');
   if (connection) {
-    return `Could not reach ${who}${cfg?.baseURL ? ` at ${cfg.baseURL}` : ''}. ${cfg?.group === 'local' ? 'Is it running on the computer that hosts CharBuild?' : 'Check the network connection.'}`;
+    const where = cfg?.baseURL ? say('Could not reach {provider} at {url}.', { url: cfg.baseURL }) : say('Could not reach {provider}.');
+    return `${where} ${cfg?.group === 'local' ? say('Is it running on the computer that hosts CharBuild?') : say('Check the network connection.')}`;
   }
   if (isApiError(err)) {
     switch (err.status) {
-      case 401: return `${who} rejected the API key. Check it in the coach settings.`;
-      case 403: return `${who} refused access${cfg?.model ? ` to “${cfg.model}”` : ''} with this key.`;
-      case 404: return `${who} couldn’t find${cfg?.model ? ` model “${cfg.model}”` : ' that model'}. Pick another one with Load models in the coach settings.`;
-      case 429: return `${who} is rate-limiting this key (or its quota is used up). Wait a moment and try again.`;
-      default: return `${who} error${err.status ? ` ${err.status}` : ''}: ${err.message}`;
+      case 401: return say('{provider} rejected the API key. Check it in the coach settings.');
+      case 403: return cfg?.model ? say('{provider} refused access to “{model}” with this key.', { model: cfg.model }) : say('{provider} refused access with this key.');
+      case 404: return cfg?.model ? say('{provider} couldn’t find model “{model}”. Pick another one with Load models in the coach settings.', { model: cfg.model }) : say('{provider} couldn’t find that model. Pick another one with Load models in the coach settings.');
+      case 429: return say('{provider} is rate-limiting this key (or its quota is used up). Wait a moment and try again.');
+      default: return err.status ? say('{provider} error {status}: {message}', { status: err.status, message: err.message }) : say('{provider} error: {message}', { message: err.message });
     }
   }
-  if (err?.status && !isApiError(err)) return err.message; // our own, already phrased for the writer
+  // Our own errors are already phrased for the writer.
+  if (err?.status && !isApiError(err)) return localizeError(err, lang);
   if (/Could not resolve authentication|api key|apiKey|credentials/i.test(err?.message || '')) {
-    return `No API key found for ${who}. Add one in the coach settings or set ${cfg?.envPrefix || 'ANTHROPIC'}_API_KEY.`;
+    return say('No API key found for {provider}. Add one in the coach settings or set {env}.', { env: `${cfg?.envPrefix || 'ANTHROPIC'}_API_KEY` });
   }
-  return err?.message || 'Something went wrong.';
+  return err?.message ? localizeError(err, lang) : tr(lang, 'Something went wrong.');
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

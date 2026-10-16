@@ -6,6 +6,10 @@
 import * as K from '/shared/catalog.js';
 import { getPath, displayName } from '/shared/model.js';
 import { esc, attr, icon } from './ui.js';
+import { t } from '/shared/i18n.js';
+
+const LEVEL_HEADS = { physical: () => t('Physical conflict'), social: () => t('Social conflict'), personal: () => t('Personal conflict'), inner: () => t('Inner conflict') };
+const MO_GROUP_TITLES = { Hollywood: () => t('Hollywood themes'), Political: () => t('Political themes'), Object: () => t('Object themes') };
 
 const fid = (path) => `f-${String(path).replace(/[^\w]+/g, '-')}`;
 
@@ -60,22 +64,22 @@ export function renderField(f, c, ctx) {
     case 'toggle':
       return `<label class="toggle"><input type="checkbox" data-path="${attr(f.path)}" data-bool ${v ? 'checked' : ''}><span class="sw"></span><span>${esc(f.label)}</span></label>`;
     case 'custom':
-      return (CUSTOM[f.component] || (() => `<p class="help">Unknown component ${esc(f.component)}</p>`))(f, c, ctx);
+      return (CUSTOM[f.component] || (() => `<p class="help">${esc(t('Unknown component {name}', { name: f.component }))}</p>`))(f, c, ctx);
     default:
       return '';
   }
 }
 
 function traitField(f, c, id) {
-  const t = K.EXPLICIT_TRAITS.find((x) => x.id === f.key);
+  const trait = K.EXPLICIT_TRAITS.find((x) => x.id === f.key);
   const shown = !!c.outer?.expressed?.[f.key];
   const v = getPath(c, f.path);
   return `<div class="field trait ${shown ? 'shown' : ''}">
-    <div class="trait-head"><label class="lbl" for="${id}">${esc(t.label)}</label>
-      <button type="button" class="eye ${shown ? 'on' : ''}" data-action="toggle-expressed" data-key="${attr(f.key)}" aria-pressed="${shown}" title="${shown ? 'Dramatized on the page' : 'Known only to the author — click to dramatize'}">${icon(shown ? 'eye' : 'eyeOff')}<span>${shown ? 'on page' : 'author only'}</span></button></div>
+    <div class="trait-head"><label class="lbl" for="${id}">${esc(trait.label)}</label>
+      <button type="button" class="eye ${shown ? 'on' : ''}" data-action="toggle-expressed" data-key="${attr(f.key)}" aria-pressed="${shown}" title="${attr(shown ? t('Dramatized on the page') : t('Known only to the author — click to dramatize'))}">${icon(shown ? 'eye' : 'eyeOff')}<span>${esc(shown ? t('on page') : t('author only'))}</span></button></div>
     ${(f.rows || 2) === 1
-    ? `<input class="inp" id="${id}" data-path="${attr(f.path)}" value="${attr(v ?? '')}" placeholder="${attr(t.desc || '')}">`
-    : `<textarea class="inp" id="${id}" rows="${f.rows || 2}" data-path="${attr(f.path)}" placeholder="${attr(t.desc || '')}">${esc(v ?? '')}</textarea>`}
+    ? `<input class="inp" id="${id}" data-path="${attr(f.path)}" value="${attr(v ?? '')}" placeholder="${attr(trait.desc || '')}">`
+    : `<textarea class="inp" id="${id}" rows="${f.rows || 2}" data-path="${attr(f.path)}" placeholder="${attr(trait.desc || '')}">${esc(v ?? '')}</textarea>`}
   </div>`;
 }
 
@@ -96,10 +100,10 @@ export function sliderRow({ path, label, min, max, step = 1, left, right, value,
     ${label ? `<div class="sl-head"><span class="sl-lbl">${esc(label)}</span>${desc ? `<span class="sl-desc">${esc(desc)}</span>` : ''}</div>` : ''}
     <div class="sl-row">
       ${left ? `<span class="pole l">${esc(left)}</span>` : ''}
-      <input type="range" min="${min}" max="${max}" step="${step}" value="${val}" ${bind} data-num style="--p:${pct}%" aria-label="${attr(label || `${left || ''} to ${right || ''}`)}">
+      <input type="range" min="${min}" max="${max}" step="${step}" value="${val}" ${bind} data-num style="--p:${pct}%" aria-label="${attr(label || t('{left} to {right}', { left: left || '', right: right || '' }))}">
       ${right ? `<span class="pole r">${esc(right)}</span>` : ''}
       <output class="sl-val">${set ? value : '—'}</output>
-      ${set && !list ? `<button type="button" class="clear" data-action="clear" data-path="${attr(path)}" title="Clear">${icon('x')}</button>` : ''}
+      ${set && !list ? `<button type="button" class="clear" data-action="clear" data-path="${attr(path)}" title="${attr(t('Clear'))}">${icon('x')}</button>` : ''}
     </div>
     ${h ? `<p class="help">${esc(h)}</p>` : ''}
   </div>`;
@@ -114,45 +118,45 @@ const listInput = (path, i, field, value, placeholder = '', tag = 'input', rows 
 const listSelect = (path, i, field, value, options, empty = '—') => `<select class="inp" data-list="${attr(path)}" data-index="${i}" data-field="${field}"><option value="">${esc(empty)}</option>${options.map((o) => `<option value="${attr(o.id)}" ${o.id === value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
 
 const itemTools = (path, i, n) => `<div class="item-tools">
-  <button type="button" class="icon-btn sm" data-action="move-item" data-list="${attr(path)}" data-index="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">${icon('up')}</button>
-  <button type="button" class="icon-btn sm" data-action="move-item" data-list="${attr(path)}" data-index="${i}" data-dir="1" ${i === n - 1 ? 'disabled' : ''} aria-label="Move down">${icon('down')}</button>
-  <button type="button" class="icon-btn sm danger" data-action="remove-item" data-list="${attr(path)}" data-index="${i}" aria-label="Remove">${icon('trash')}</button></div>`;
+  <button type="button" class="icon-btn sm" data-action="move-item" data-list="${attr(path)}" data-index="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="${attr(t('Move up'))}">${icon('up')}</button>
+  <button type="button" class="icon-btn sm" data-action="move-item" data-list="${attr(path)}" data-index="${i}" data-dir="1" ${i === n - 1 ? 'disabled' : ''} aria-label="${attr(t('Move down'))}">${icon('down')}</button>
+  <button type="button" class="icon-btn sm danger" data-action="remove-item" data-list="${attr(path)}" data-index="${i}" aria-label="${attr(t('Remove'))}">${icon('trash')}</button></div>`;
 
 const CUSTOM = {
   personae(f, c) {
     const list = c.selves?.personae || [];
     return `<div class="list">${list.map((p, i) => `<div class="list-item persona">
-        <div class="row2">${listInput('selves.personae', i, 'with', p.with, 'With whom? (boss, mother, ex…)')}
-        ${listSelect('selves.personae', i, 'axis', p.axis, [{ id: 'power', label: 'Power (social)' }, { id: 'intimacy', label: 'Intimacy (personal)' }], 'Axis…')}</div>
-        ${listInput('selves.personae', i, 'persona', p.persona, 'Voice, eyes, posture, energy — the mask she wears', 'textarea')}
+        <div class="row2">${listInput('selves.personae', i, 'with', p.with, t('With whom? (boss, mother, ex…)'))}
+        ${listSelect('selves.personae', i, 'axis', p.axis, [{ id: 'power', label: t('Power (social)') }, { id: 'intimacy', label: t('Intimacy (personal)') }], t('Axis…'))}</div>
+        ${listInput('selves.personae', i, 'persona', p.persona, t('Voice, eyes, posture, energy — the mask she wears'), 'textarea')}
         ${itemTools('selves.personae', i, list.length)}</div>`).join('')}
-      <button type="button" class="btn ghost" data-action="add-item" data-list="selves.personae">${icon('plus')} Add a persona</button></div>`;
+      <button type="button" class="btn ghost" data-action="add-item" data-list="selves.personae">${icon('plus')} ${esc(t('Add a persona'))}</button></div>`;
   },
 
   dimensions(f, c) {
     const list = c.dimensions || [];
     const cards = list.map((d, i) => `<div class="list-item dim ${d.defining ? 'defining' : ''}" id="dim-${attr(d.id)}">
       <div class="dim-poles">
-        <span class="pole-tag pos">+</span>${listInput('dimensions', i, 'positive', d.positive, 'Positive pole')}
+        <span class="pole-tag pos">+</span>${listInput('dimensions', i, 'positive', d.positive, t('Positive pole'))}
         <span class="slash">/</span>
-        <span class="pole-tag neg">−</span>${listInput('dimensions', i, 'negative', d.negative, 'Negative pole')}
-        <button type="button" class="star ${d.defining ? 'on' : ''}" data-action="set-defining" data-index="${i}" aria-pressed="${!!d.defining}" title="Defining dimension">${icon('star')}<span>${d.defining ? 'Defining' : 'Make defining'}</span></button>
+        <span class="pole-tag neg">−</span>${listInput('dimensions', i, 'negative', d.negative, t('Negative pole'))}
+        <button type="button" class="star ${d.defining ? 'on' : ''}" data-action="set-defining" data-index="${i}" aria-pressed="${!!d.defining}" title="${attr(t('Defining dimension'))}">${icon('star')}<span>${esc(d.defining ? t('Defining') : t('Make defining'))}</span></button>
       </div>
       <div class="row2">
-        ${listSelect('dimensions', i, 'type', d.type, K.DIMENSION_TYPES, 'Kind of contradiction…')}
-        ${listSelect('dimensions', i, 'level', d.level, K.SELF_LEVELS, 'Level of self…')}
+        ${listSelect('dimensions', i, 'type', d.type, K.DIMENSION_TYPES, t('Kind of contradiction…'))}
+        ${listSelect('dimensions', i, 'level', d.level, K.SELF_LEVELS, t('Level of self…'))}
       </div>
       <div class="row2">
-        ${listInput('dimensions', i, 'positiveExample', d.positiveExample, '(+) when does she show this pole?', 'textarea')}
-        ${listInput('dimensions', i, 'negativeExample', d.negativeExample, '(−) and this one?', 'textarea')}
+        ${listInput('dimensions', i, 'positiveExample', d.positiveExample, t('(+) when does she show this pole?'), 'textarea')}
+        ${listInput('dimensions', i, 'negativeExample', d.negativeExample, t('(−) and this one?'), 'textarea')}
       </div>
-      <div class="dim-tests">${[['consistent', 'Consistent', 'A pattern, not a one-off kindness or a snit'], ['variable', 'Variable', 'Unpredictable, progressing — not the same cat and dog every time'], ['unresolvable', 'Unresolvable', 'It must seem impossible to settle']].map(([k, l, t]) => `<label class="mini-check" title="${attr(t)}"><input type="checkbox" data-list="dimensions" data-index="${i}" data-field="${k}" data-bool ${d[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <div class="dim-tests">${[['consistent', t('Consistent'), t('A pattern, not a one-off kindness or a snit')], ['variable', t('Variable'), t('Unpredictable, progressing — not the same cat and dog every time')], ['unresolvable', t('Unresolvable'), t('It must seem impossible to settle')]].map(([k, l, tip]) => `<label class="mini-check" title="${attr(tip)}"><input type="checkbox" data-list="dimensions" data-index="${i}" data-field="${k}" data-bool ${d[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
       ${itemTools('dimensions', i, list.length)}
     </div>`).join('');
     const sugg = K.DIMENSION_SUGGESTIONS.filter(([p, n]) => !list.some((d) => d.positive === p && d.negative === n)).slice(0, 14);
-    return `<div class="list">${cards || '<p class="help">No dimensions yet. A dimension is a living contradiction — wise yet foolish, generous to some, selfish to others.</p>'}
-      <div class="add-row"><button type="button" class="btn" data-action="add-item" data-list="dimensions">${icon('plus')} Add a dimension</button>
-      <span class="help">or start from a pair:</span></div>
+    return `<div class="list">${cards || `<p class="help">${esc(t('No dimensions yet. A dimension is a living contradiction — wise yet foolish, generous to some, selfish to others.'))}</p>`}
+      <div class="add-row"><button type="button" class="btn" data-action="add-item" data-list="dimensions">${icon('plus')} ${esc(t('Add a dimension'))}</button>
+      <span class="help">${esc(t('or start from a pair:'))}</span></div>
       <div class="chips small">${sugg.map(([p, n]) => `<button type="button" class="chip" data-action="add-dimension" data-pos="${attr(p)}" data-neg="${attr(n)}">${esc(p)} / ${esc(n)}</button>`).join('')}</div></div>`;
   },
 
@@ -161,76 +165,76 @@ const CUSTOM = {
     const notes = c.complexity?.antagonismNotes || {};
     let lastLevel = '';
     const rows = K.ANTAGONISM_FORCES.map((force) => {
-      const head = force.level !== lastLevel ? `<h4 class="lvl-head lvl-${force.level}">${esc(K.CONFLICT_LEVELS.find((l) => l.id === force.level).label)} conflict</h4>` : '';
+      const head = force.level !== lastLevel ? `<h4 class="lvl-head lvl-${force.level}">${esc(LEVEL_HEADS[force.level]?.() || force.level)}</h4>` : '';
       lastLevel = force.level;
       return `${head}<div class="force">${sliderRow({ path: `complexity.antagonism.${force.id}`, label: force.label, desc: force.desc, min: 0, max: 10, value: a[force.id], inline: true })}
-        <input class="inp sm" data-path="complexity.antagonismNotes.${force.id}" value="${attr(notes[force.id] || '')}" placeholder="How does it bear down on her?"></div>`;
+        <input class="inp sm" data-path="complexity.antagonismNotes.${force.id}" value="${attr(notes[force.id] || '')}" placeholder="${attr(t('How does it bear down on her?'))}"></div>`;
     }).join('');
     return `<div class="antagonism">${rows}
-      <div class="capacity">${sliderRow({ path: 'complexity.capacity', label: 'Her capacities — mental, emotional, physical', min: 0, max: 10, value: c.complexity?.capacity, left: 'Feeble', right: 'Formidable', help: 'Weigh her in one hand and every negative power in the other. (Ch. 6)' })}</div></div>`;
+      <div class="capacity">${sliderRow({ path: 'complexity.capacity', label: t('Her capacities — mental, emotional, physical'), min: 0, max: 10, value: c.complexity?.capacity, left: t('Feeble'), right: t('Formidable'), help: t('Weigh her in one hand and every negative power in the other. (Ch. 6)') })}</div></div>`;
   },
 
   dimensionPicker(f, c) {
     const dims = c.dimensions || [];
     return `<label class="field"><span class="lbl">${esc(f.label)}</span><select class="inp" data-path="arc.dimensionId"><option value="">—</option>${dims.map((d) => `<option value="${attr(d.id)}" ${c.arc?.dimensionId === d.id ? 'selected' : ''}>${esc(d.positive || '?')} / ${esc(d.negative || '?')}${d.defining ? ' ★' : ''}</option>`).join('')}</select>
-      ${dims.length ? '' : '<p class="help">Add dimensions first (station 09).</p>'}</label>`;
+      ${dims.length ? '' : `<p class="help">${esc(t('Add dimensions first (station 09).'))}</p>`}</label>`;
   },
 
   turningPoints(f, c) {
     const list = c.arc?.turningPoints || [];
-    return `<div class="list">${list.map((t, i) => `<div class="list-item tp-row"><span class="tp-num">${i + 1}</span>
-        ${listInput('arc.turningPoints', i, 'label', t.label, 'What happens?')}
-        <div class="tp-charge">${sliderRow({ min: -5, max: 5, value: Number(t.charge), left: '−', right: '+', diverging: true, list: { path: 'arc.turningPoints', index: i, field: 'charge' } })}</div>
+    return `<div class="list">${list.map((tp, i) => `<div class="list-item tp-row"><span class="tp-num">${i + 1}</span>
+        ${listInput('arc.turningPoints', i, 'label', tp.label, t('What happens?'))}
+        <div class="tp-charge">${sliderRow({ min: -5, max: 5, value: Number(tp.charge), left: '−', right: '+', diverging: true, list: { path: 'arc.turningPoints', index: i, field: 'charge' } })}</div>
         ${itemTools('arc.turningPoints', i, list.length)}</div>`).join('')}
-      <button type="button" class="btn ghost" data-action="add-item" data-list="arc.turningPoints">${icon('plus')} Add a turning point</button></div>`;
+      <button type="button" class="btn ghost" data-action="add-item" data-list="arc.turningPoints">${icon('plus')} ${esc(t('Add a turning point'))}</button></div>`;
   },
 
   scenes(f, c) {
     const list = c.action?.scenes || [];
     const P = 'action.scenes';
     return `<div class="list">${list.map((s, i) => `<details class="list-item scene" ${i === list.length - 1 ? 'open' : ''}>
-        <summary><b>${i + 1}. ${esc(s.title || 'Untitled scene')}</b>${Number.isFinite(s.from) && Number.isFinite(s.to) ? `<span class="charge-pill ${s.to > s.from ? 'pos' : s.to < s.from ? 'neg' : ''}">${esc(s.value || 'value')} ${s.from > 0 ? '+' : ''}${s.from} → ${s.to > 0 ? '+' : ''}${s.to}</span>` : ''}</summary>
+        <summary><b>${i + 1}. ${esc(s.title || t('Untitled scene'))}</b>${Number.isFinite(s.from) && Number.isFinite(s.to) ? `<span class="charge-pill ${s.to > s.from ? 'pos' : s.to < s.from ? 'neg' : ''}">${esc(s.value || t('value'))} ${s.from > 0 ? '+' : ''}${s.from} → ${s.to > 0 ? '+' : ''}${s.to}</span>` : ''}</summary>
         <div class="scene-grid">
-          <label class="field"><span class="lbl">Scene</span>${listInput(P, i, 'title', s.title, 'Where / what')}</label>
-          <label class="field"><span class="lbl">Scene-objective — what she wants now</span>${listInput(P, i, 'objective', s.objective, 'A step toward the super-objective', 'textarea')}</label>
-          <label class="field"><span class="lbl">First action (her MO)</span>${listInput(P, i, 'action', s.action, '', 'textarea')}</label>
-          <label class="field"><span class="lbl">Expectation — “if I do X, Y will happen”</span>${listInput(P, i, 'expectation', s.expectation, '', 'textarea')}</label>
-          <label class="field"><span class="lbl">Counteraction</span>${listInput(P, i, 'counteraction', s.counteraction, 'What blocks her?', 'textarea')}</label>
-          <label class="field"><span class="lbl">Source of counteraction</span>${listSelect(P, i, 'source', s.source, K.COUNTERACTION_SOURCES)}</label>
-          <label class="field"><span class="lbl">Surprise</span>${listInput(P, i, 'surprise', s.surprise, 'What does she suddenly discover?', 'textarea')}</label>
-          <label class="field"><span class="lbl">Value at stake</span>${listInput(P, i, 'value', s.value, 'Truth, Safety, Love…')}</label>
-          <div class="field"><span class="lbl">Charge at opening</span>${sliderRow({ min: -5, max: 5, value: s.from, left: '−', right: '+', diverging: true, list: { path: P, index: i, field: 'from' } })}</div>
-          <div class="field"><span class="lbl">Charge at close</span>${sliderRow({ min: -5, max: 5, value: s.to, left: '−', right: '+', diverging: true, list: { path: P, index: i, field: 'to' } })}</div>
-          <label class="field"><span class="lbl">Reaction</span>${listInput(P, i, 'reaction', s.reaction, 'Her never-seen-before reaction', 'textarea')}</label>
-          <label class="field"><span class="lbl">What she does next</span>${listInput(P, i, 'next', s.next, '', 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('Scene'))}</span>${listInput(P, i, 'title', s.title, t('Where / what'))}</label>
+          <label class="field"><span class="lbl">${esc(t('Scene-objective — what she wants now'))}</span>${listInput(P, i, 'objective', s.objective, t('A step toward the super-objective'), 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('First action (her MO)'))}</span>${listInput(P, i, 'action', s.action, '', 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('Expectation — “if I do X, Y will happen”'))}</span>${listInput(P, i, 'expectation', s.expectation, '', 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('Counteraction'))}</span>${listInput(P, i, 'counteraction', s.counteraction, t('What blocks her?'), 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('Source of counteraction'))}</span>${listSelect(P, i, 'source', s.source, K.COUNTERACTION_SOURCES)}</label>
+          <label class="field"><span class="lbl">${esc(t('Surprise'))}</span>${listInput(P, i, 'surprise', s.surprise, t('What does she suddenly discover?'), 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('Value at stake'))}</span>${listInput(P, i, 'value', s.value, t('Truth, Safety, Love…'))}</label>
+          <div class="field"><span class="lbl">${esc(t('Charge at opening'))}</span>${sliderRow({ min: -5, max: 5, value: s.from, left: '−', right: '+', diverging: true, list: { path: P, index: i, field: 'from' } })}</div>
+          <div class="field"><span class="lbl">${esc(t('Charge at close'))}</span>${sliderRow({ min: -5, max: 5, value: s.to, left: '−', right: '+', diverging: true, list: { path: P, index: i, field: 'to' } })}</div>
+          <label class="field"><span class="lbl">${esc(t('Reaction'))}</span>${listInput(P, i, 'reaction', s.reaction, t('Her never-seen-before reaction'), 'textarea')}</label>
+          <label class="field"><span class="lbl">${esc(t('What she does next'))}</span>${listInput(P, i, 'next', s.next, '', 'textarea')}</label>
         </div>
         ${itemTools(P, i, list.length)}</details>`).join('')}
-      <button type="button" class="btn ghost" data-action="add-item" data-list="${P}">${icon('plus')} Add a scene</button></div>`;
+      <button type="button" class="btn ghost" data-action="add-item" data-list="${P}">${icon('plus')} ${esc(t('Add a scene'))}</button></div>`;
   },
 
   relationships(f, c, ctx) {
     const others = (ctx.cast || []).filter((m) => m.id !== c.id);
     const list = c.relationships || [];
     const P = 'relationships';
-    if (!others.length) return '<p class="help">This character has no castmates yet. Add characters to the story to link them.</p>';
+    if (!others.length) return `<p class="help">${esc(t('This character has no castmates yet. Add characters to the story to link them.'))}</p>`;
     const dims = (c.dimensions || []).map((d) => ({ id: d.id, label: `${d.positive || '?'} / ${d.negative || '?'}` }));
     return `<div class="list">${list.map((r, i) => `<div class="list-item rel">
-        <div class="row3">${listSelect(P, i, 'targetId', r.targetId, others.map((m) => ({ id: m.id, label: displayName(m) })), 'Character…')}
-        ${listSelect(P, i, 'kind', r.kind, K.RELATIONSHIP_KINDS, 'Kind…')}
-        ${listSelect(P, i, 'effect', r.effect, K.RELATIONSHIP_EFFECTS, 'Helps/hinders…')}</div>
-        <div class="row2">${listInput(P, i, 'draws', r.draws, 'Which trait or truth does this person draw out of her?')}
-        ${listSelect(P, i, 'dimensionId', r.dimensionId, dims, 'Activates dimension…')}</div>
-        ${listInput(P, i, 'bringsOut', r.bringsOut, 'And what does she bring out in them?')}
+        <div class="row3">${listSelect(P, i, 'targetId', r.targetId, others.map((m) => ({ id: m.id, label: displayName(m) })), t('Character…'))}
+        ${listSelect(P, i, 'kind', r.kind, K.RELATIONSHIP_KINDS, t('Kind…'))}
+        ${listSelect(P, i, 'effect', r.effect, K.RELATIONSHIP_EFFECTS, t('Helps/hinders…'))}</div>
+        <div class="row2">${listInput(P, i, 'draws', r.draws, t('Which trait or truth does this person draw out of her?'))}
+        ${listSelect(P, i, 'dimensionId', r.dimensionId, dims, t('Activates dimension…'))}</div>
+        ${listInput(P, i, 'bringsOut', r.bringsOut, t('And what does she bring out in them?'))}
         ${itemTools(P, i, list.length)}</div>`).join('')}
-      <button type="button" class="btn ghost" data-action="add-item" data-list="${P}">${icon('plus')} Link a cast member</button></div>`;
+      <button type="button" class="btn ghost" data-action="add-item" data-list="${P}">${icon('plus')} ${esc(t('Link a cast member'))}</button></div>`;
   },
 
   genreInfo(f, c, ctx) {
     const story = ctx.story;
-    if (!story) return '<p class="help">This character isn’t part of a story yet.</p>';
+    if (!story) return `<p class="help">${esc(t('This character isn’t part of a story yet.'))}</p>`;
     const genres = (story.genre?.primary || []).map((id) => K.PRIMARY_GENRES.find((g) => g.id === id)).filter(Boolean);
-    return `<div class="genre-strip">${genres.length ? genres.map((g) => `<span class="gchip ${g.family}">${esc(g.label)}</span>`).join('') : '<span class="help">No genre chosen yet.</span>'}
-      <a class="btn ghost sm" href="#/story/${attr(story.id)}">Edit story genre ${icon('chevron')}</a></div>`;
+    return `<div class="genre-strip">${genres.length ? genres.map((g) => `<span class="gchip ${g.family}">${esc(g.label)}</span>`).join('') : `<span class="help">${esc(t('No genre chosen yet.'))}</span>`}
+      <a class="btn ghost sm" href="#/story/${attr(story.id)}">${esc(t('Edit story genre'))} ${icon('chevron')}</a></div>`;
   },
 
   coreCastPicker(f, c, ctx) {
@@ -238,14 +242,14 @@ const CUSTOM = {
     const roles = [...new Set(genres.flatMap((g) => g.coreCast))];
     const v = c.genre?.coreCastRole || '';
     return `<div class="field"><span class="lbl">${esc(f.label)}</span>
-      ${roles.length ? `<div class="seg">${roles.map((r) => `<button type="button" class="seg-btn ${r === v ? 'on' : ''}" data-path="genre.coreCastRole" data-value="${attr(r)}">${esc(r)}</button>`).join('')}</div>` : ''}
-      <input class="inp" data-path="genre.coreCastRole" value="${attr(v)}" placeholder="Or type a position"></div>`;
+      ${roles.length ? `<div class="seg">${roles.map((r) => `<button type="button" class="seg-btn ${r === v ? 'on' : ''}" data-path="genre.coreCastRole" data-value="${attr(r)}">${esc(t(r))}</button>`).join('')}</div>` : ''}
+      <input class="inp" data-path="genre.coreCastRole" value="${attr(v)}" placeholder="${attr(t('Or type a position'))}"></div>`;
   },
 
   moPicker(f, c) {
     const v = c.action?.mo?.theme;
     const groups = [...new Set(K.MO_THEMES.map((m) => m.group))];
-    return `<div class="field"><span class="lbl">${esc(f.label)}</span>${groups.map((g) => `<div class="mo-group"><h5>${esc(g)} themes</h5><div class="opt-cards three">${K.MO_THEMES.filter((m) => m.group === g).map((m) => `<button type="button" class="opt-card ${m.id === v ? 'on' : ''}" data-path="action.mo.theme" data-value="${attr(m.id)}"><b>${esc(m.label)}</b><span>${esc(m.desc)}</span><em>Twist: ${esc(m.twist)}</em></button>`).join('')}</div></div>`).join('')}</div>`;
+    return `<div class="field"><span class="lbl">${esc(f.label)}</span>${groups.map((g) => `<div class="mo-group"><h5>${esc(MO_GROUP_TITLES[g]?.() || g)}</h5><div class="opt-cards three">${K.MO_THEMES.filter((m) => m.group === g).map((m) => `<button type="button" class="opt-card ${m.id === v ? 'on' : ''}" data-path="action.mo.theme" data-value="${attr(m.id)}"><b>${esc(m.label)}</b><span>${esc(m.desc)}</span><em>${esc(t('Twist: {twist}', { twist: m.twist }))}</em></button>`).join('')}</div></div>`).join('')}</div>`;
   },
 
   genrePicker(f, story) {
@@ -253,10 +257,10 @@ const CUSTOM = {
     const fam = (family, title) => `<h5>${title}</h5><div class="genre-grid">${K.PRIMARY_GENRES.filter((g) => g.family === family).map((g) => {
       const on = v.includes(g.id);
       return `<button type="button" class="genre-card ${on ? 'on' : ''} ${family}" data-path="genre.primary" data-toggle="${attr(g.id)}" aria-pressed="${on}">
-        <b>${esc(g.label)}</b><span class="gv">${esc(g.coreValue)}</span><small>${esc(g.coreEvent)} · ${esc(g.coreEmotion)}</small><small class="cast">${esc(g.coreCast.join(' · '))}</small></button>`;
+        <b>${esc(g.label)}</b><span class="gv">${esc(g.coreValue)}</span><small>${esc(g.coreEvent)} · ${esc(g.coreEmotion)}</small><small class="cast">${esc(g.coreCast.map((r) => t(r)).join(' · '))}</small></button>`;
     }).join('')}</div>`;
-    return `<div class="field"><span class="lbl">${esc(f.label)}</span>${fam('fortune', 'Ten plots of fortune — outer conditions change')}${fam('character', 'Six plots of character — morality, mentality, humanity change')}
-      <p class="help">Combine a plot of fortune with a plot of character to merge an outer spine with an inner arc. (Ch. 14)</p></div>`;
+    return `<div class="field"><span class="lbl">${esc(f.label)}</span>${fam('fortune', esc(t('Ten plots of fortune — outer conditions change')))}${fam('character', esc(t('Six plots of character — morality, mentality, humanity change')))}
+      <p class="help">${esc(t('Combine a plot of fortune with a plot of character to merge an outer spine with an inner arc. (Ch. 14)'))}</p></div>`;
   },
 };
 

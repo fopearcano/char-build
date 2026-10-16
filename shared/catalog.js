@@ -240,10 +240,10 @@ export const EXPLICIT_TRAITS = [
 
 // ── Ch. 5 · Four selves ──────────────────────────────────────────────────
 export const SELF_LEVELS = [
-  opt('social', 'Social self', 'Public personae shaped by power: boss/employee, cop/criminal, server/served.', { madMen: 'Work life' }),
-  opt('personal', 'Personal self', 'Intimate personae for family, friends, lovers.', { madMen: 'Intimate life' }),
-  opt('core', 'Core (private) self', 'The observing consciousness that decides and judges.', { madMen: 'Secret life' }),
-  opt('hidden', 'Hidden self', 'The subconscious: contradictory drives that surface under sudden pressure.', { madMen: 'Subconscious life' }),
+  opt('social', 'Social self', 'Public personae shaped by power: boss/employee, cop/criminal, server/served.', { madMen: 'Work life', short: 'Social' }),
+  opt('personal', 'Personal self', 'Intimate personae for family, friends, lovers.', { madMen: 'Intimate life', short: 'Personal' }),
+  opt('core', 'Core (private) self', 'The observing consciousness that decides and judges.', { madMen: 'Secret life', short: 'Core' }),
+  opt('hidden', 'Hidden self', 'The subconscious: contradictory drives that surface under sudden pressure.', { madMen: 'Subconscious life', short: 'Hidden' }),
 ];
 
 export const SELF_VARIATIONS = [

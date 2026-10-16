@@ -21,6 +21,8 @@ import { updateContext } from './store.js';
 import { PROVIDERS, PROVIDER_BY_ID, ANTHROPIC_EFFORTS, REASONING_EFFORTS, resolveProvider, activeProviderId, publicProvider, pickChatModel } from './providers.js';
 import { createAnthropicClient, runAnthropicTurn, testAnthropic, listAnthropicModels, closingMessage as anthropicClosing } from './llm/anthropic.js';
 import { createOpenAIClient, runOpenAITurn, listOpenAIModels, closingMessage as openaiClosing } from './llm/openai.js';
+import { tr, i18nError, DEFAULT_LOCALE } from '../shared/i18n.js';
+import './i18n.js';
 
 export const DEFAULT_MODEL = PROVIDER_BY_ID.anthropic.defaultModel;
 const MAX_ITERATIONS = 8;
@@ -190,6 +192,19 @@ function parseLoose(v) {
   return v;
 }
 
+// When the writer's interface language changes (or isn't English from the
+// start), the next user turn says so. The system prompt stays fixed.
+function languageBlock(lang, mode) {
+  if (lang === 'it') {
+    if (mode === 'interview') return '<interface_language>The writer uses CharBuild in Italian. Stay in character and speak Italian (italiano), in your own voice.</interface_language>';
+    const stations = SECTIONS.map((s) => `${s.num} ${tr('it', s.title)}`).join('; ');
+    return `<interface_language>The writer uses CharBuild in Italian. Write every reply in Italian (italiano), including the text values you propose for fields and every summary and rationale; paths and option ids stay exactly as in the field index. Call the stations by their Italian names: ${stations}. The book is the original English edition: search it with English keywords, and translate or paraphrase what you cite into Italian, giving the chapter as "(Cap. N)".</interface_language>`;
+  }
+  return mode === 'interview'
+    ? '<interface_language>The writer now uses CharBuild in English. Stay in character and speak English.</interface_language>'
+    : '<interface_language>The writer now uses CharBuild in English. Reply in English and use the station names from the framework above.</interface_language>';
+}
+
 const SearchInput = z.object({ query: z.string().min(1).max(300), max_results: z.number().int().min(1).max(8).optional() });
 const ProposeInput = z.object({
   summary: z.string().max(500),
@@ -217,7 +232,7 @@ export function createAI({ store, rootDir, makeClient }) {
   };
   const autoModels = new Map(); // provider+baseURL → model picked from its /models list
 
-  function status() {
+  function status(lang) {
     const a = activeCfg();
     return {
       provider: a.id,
@@ -230,16 +245,15 @@ export function createAI({ store, rootDir, makeClient }) {
       reasoningEffort: a.reasoningEffort,
       baseURL: a.baseURL,
       providers: PROVIDERS.map((d) => publicProvider(providerCfg(d.id))),
-      book: bookStatus(rootDir),
+      book: bookStatus(rootDir, lang),
     };
   }
 
   async function updateSettings(body = {}) {
     const { provider, providerId, apiKey, clearKey, model, baseURL, effort, reasoningEffort } = body;
-    const bad = (msg) => Object.assign(new Error(msg), { status: 400 });
-    if (provider != null && !PROVIDER_BY_ID[provider]) throw bad(`Unknown AI provider "${provider}"`);
+    if (provider != null && !PROVIDER_BY_ID[provider]) throw i18nError(400, 'Unknown AI provider “{id}”', { id: provider });
     const id = providerId || provider || activeProviderId(store.settings);
-    if (!PROVIDER_BY_ID[id]) throw bad(`Unknown AI provider "${id}"`);
+    if (!PROVIDER_BY_ID[id]) throw i18nError(400, 'Unknown AI provider “{id}”', { id });
 
     const providers = structuredClone(store.settings.providers || {});
     const patch = {};
@@ -257,7 +271,7 @@ export function createAI({ store, rootDir, makeClient }) {
     }
     if (typeof baseURL === 'string') {
       const b = baseURL.trim();
-      if (b && !/^https?:\/\/[^\s]+$/i.test(b)) throw bad('Base URL must start with http:// or https://');
+      if (b && !/^https?:\/\/[^\s]+$/i.test(b)) throw i18nError(400, 'Base URL must start with http:// or https://');
       if (b) cur.baseURL = b;
       else delete cur.baseURL;
     }
@@ -281,10 +295,9 @@ export function createAI({ store, rootDir, makeClient }) {
 
   function requireConfigured(cfg) {
     if (cfg.configured) return;
-    const msg = cfg.needsKey
-      ? `${cfg.label} has no API key yet. Add one in the coach settings (or set ${cfg.envPrefix}_API_KEY).`
-      : `${cfg.label} needs a base URL. Set it in the coach settings.`;
-    throw Object.assign(new Error(msg), { status: 400 });
+    throw cfg.needsKey
+      ? i18nError(400, '{provider} has no API key yet. Add one in the coach settings (or set {env}).', { provider: cfg.label, env: `${cfg.envPrefix}_API_KEY` })
+      : i18nError(400, '{provider} needs a base URL. Set it in the coach settings.', { provider: cfg.label });
   }
 
   async function listModels(id) {
@@ -299,9 +312,10 @@ export function createAI({ store, rootDir, makeClient }) {
     }
   }
 
-  async function test(id) {
+  async function test(id, lang = DEFAULT_LOCALE) {
     const cfg = providerCfg(id || activeProviderId(store.settings));
-    if (!cfg.configured) return { ok: false, error: cfg.needsKey ? `${cfg.label} has no API key yet.` : `${cfg.label} needs a base URL.` };
+    const label = tr(lang, cfg.label);
+    if (!cfg.configured) return { ok: false, error: cfg.needsKey ? tr(lang, '{provider} has no API key yet.', { provider: label }) : tr(lang, '{provider} needs a base URL.', { provider: label }) };
     try {
       const client = clientFor(cfg);
       if (cfg.kind === 'anthropic') return { ...(await testAnthropic(client, cfg)), provider: cfg.label };
@@ -310,7 +324,7 @@ export function createAI({ store, rootDir, makeClient }) {
         const pick = pickChatModel(ids);
         return pick
           ? { ok: true, provider: cfg.label, model: pick, name: `${pick} (auto)`, count: ids.length }
-          : { ok: false, provider: cfg.label, error: `${cfg.label} answered but lists no models. Install or load one first.` };
+          : { ok: false, provider: cfg.label, error: tr(lang, '{provider} answered but lists no models. Install or load one first.', { provider: label }) };
       }
       const listed = !ids.length || ids.includes(cfg.model);
       return {
@@ -319,7 +333,7 @@ export function createAI({ store, rootDir, makeClient }) {
         model: cfg.model,
         name: cfg.model,
         count: ids.length,
-        warning: listed ? undefined : `“${cfg.model}” isn’t in ${cfg.label}’s model list (${ids.length} models). Use Load models to pick one.`,
+        warning: listed ? undefined : tr(lang, '“{model}” isn’t in {provider}’s model list ({n} models). Use Load models to pick one.', { model: cfg.model, provider: label, n: ids.length }),
       };
     } catch (err) {
       err.provider = cfg;
@@ -327,16 +341,16 @@ export function createAI({ store, rootDir, makeClient }) {
     }
   }
 
-  async function withModel(cfg, client, emit) {
+  async function withModel(cfg, client, emit, lang = DEFAULT_LOCALE) {
     if (cfg.model) return cfg;
     const key = `${cfg.id}|${cfg.baseURL}`;
     let model = autoModels.get(key);
     if (!model) {
       const ids = cfg.kind === 'anthropic' ? await listAnthropicModels(client) : await listOpenAIModels(client);
       model = pickChatModel(ids);
-      if (!model) throw Object.assign(new Error(`${cfg.label} lists no models. Install or load one, or set a model in the coach settings.`), { status: 400 });
+      if (!model) throw i18nError(400, '{provider} lists no models. Install or load one, or set a model in the coach settings.', { provider: cfg.label });
       autoModels.set(key, model);
-      emit('notice', { message: `Using ${cfg.label} model “${model}”.` });
+      emit('notice', { message: tr(lang, 'Using {provider} model “{model}”.', { provider: tr(lang, cfg.label), model }) });
     }
     return { ...cfg, model };
   }
@@ -353,8 +367,9 @@ export function createAI({ store, rootDir, makeClient }) {
       case 'search_mckee_book': {
         const parsed = SearchInput.safeParse(input);
         if (!parsed.success) return { error: true, content: JSON.stringify({ INVALID_JSON: JSON.stringify(input) }) };
-        const res = searchBook(rootDir, parsed.data.query, parsed.data.max_results || 4);
-        emit('tool', { name, label: `Searched the book: “${parsed.data.query}”`, results: res.results?.map((r) => ({ chapter: r.chapter, section: r.section })) });
+        const lang = chat.lang || DEFAULT_LOCALE;
+        const res = searchBook(rootDir, parsed.data.query, parsed.data.max_results || 4, 1400, lang);
+        emit('tool', { name, query: parsed.data.query, label: tr(lang, 'Searched the book: “{query}”', { query: parsed.data.query }), results: res.results?.map((r) => ({ chapter: r.chapter, section: r.section })) });
         if (!res.available) return { content: `The book is not available (${res.reason}). Rely on the framework summary instead and say so.` };
         if (!res.results.length) return { content: 'No passages matched. Try different keywords.' };
         return { content: res.results.map((r, i) => `[${i + 1}] ${r.chapter}${r.section ? ` · ${r.section}` : ''}\n${r.text}`).join('\n\n') };
@@ -366,7 +381,7 @@ export function createAI({ store, rootDir, makeClient }) {
         const td = traitDensity(character);
         const focus = SECTION_BY_ID[input?.focus] ? input.focus : null;
         const checks = characterChecks(character, story, cast).filter((c) => !focus || c.section === focus);
-        emit('tool', { name, label: 'Ran the McKee diagnostics' });
+        emit('tool', { name, label: tr(chat.lang || DEFAULT_LOCALE, 'Ran the McKee diagnostics') });
         return {
           content: JSON.stringify({
             progress: Math.round(progress.ratio * 100) + '%',
@@ -421,11 +436,15 @@ export function createAI({ store, rootDir, makeClient }) {
 
   // Text blocks prepended to the user's message: the character snapshot
   // when it changed since the last turn, and the station in focus.
-  function contextBlocks(chat, section) {
+  function contextBlocks(chat, section, lang) {
     const { character, story, cast } = contextFor(chat.characterId);
     const digest = characterDigest(character, story, cast);
     const hash = crypto.createHash('sha1').update(digest).digest('hex');
     const blocks = [];
+    if ((chat.lang || DEFAULT_LOCALE) !== lang) {
+      chat.lang = lang;
+      blocks.push(languageBlock(lang, chat.mode));
+    }
     if (hash !== chat.snapshotHash) {
       chat.snapshotHash = hash;
       blocks.push(chat.mode === 'interview' ? `<dossier>\n${digest}\n</dossier>` : `<character_snapshot>\n${digest}\n</character_snapshot>`);
@@ -437,10 +456,10 @@ export function createAI({ store, rootDir, makeClient }) {
     return blocks;
   }
 
-  async function getOrCreateChat({ conversationId, mode, characterId }) {
+  async function getOrCreateChat({ conversationId, mode, characterId, lang }) {
     if (conversationId) {
       const chat = await store.loadChat(conversationId);
-      if (!chat) throw Object.assign(new Error('Conversation not found'), { status: 404 });
+      if (!chat) throw i18nError(404, 'Conversation not found');
       chat.provider = chat.provider || 'anthropic'; // conversations from before multi-provider support
       return chat;
     }
@@ -452,7 +471,7 @@ export function createAI({ store, rootDir, makeClient }) {
       provider: activeProviderId(store.settings),
       characterId,
       storyId: character.storyId,
-      title: mode === 'interview' ? `Interview with ${displayName(character)}` : `Coaching ${displayName(character)}`,
+      title: mode === 'interview' ? tr(lang, 'Interview with {name}', { name: displayName(character) }) : tr(lang, 'Coaching {name}', { name: displayName(character) }),
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -462,12 +481,12 @@ export function createAI({ store, rootDir, makeClient }) {
   }
 
   // Runs one user turn; emits SSE events through `emit(type, data)`.
-  async function chat({ conversationId, mode = 'coach', characterId, message, section }, emit, signal) {
-    if (!['coach', 'interview'].includes(mode)) throw Object.assign(new Error('Unknown mode'), { status: 400 });
+  async function chat({ conversationId, mode = 'coach', characterId, message, section, lang = DEFAULT_LOCALE }, emit, signal) {
+    if (!['coach', 'interview'].includes(mode)) throw i18nError(400, 'Unknown mode');
     const text = String(message || '').trim();
-    if (!text) throw Object.assign(new Error('Empty message'), { status: 400 });
-    if (text.length > 20000) throw Object.assign(new Error('Message too long'), { status: 400 });
-    const chat = await getOrCreateChat({ conversationId, mode, characterId });
+    if (!text) throw i18nError(400, 'Empty message');
+    if (text.length > 20000) throw i18nError(400, 'Message too long');
+    const chat = await getOrCreateChat({ conversationId, mode, characterId, lang });
     // A conversation stays with the provider it started on: message formats
     // (and thinking blocks) aren't portable between APIs.
     let cfg = providerCfg(chat.provider);
@@ -483,17 +502,18 @@ export function createAI({ store, rootDir, makeClient }) {
     };
     const active = activeProviderId(store.settings);
     if (conversationId && chat.provider !== active) {
-      tracked('notice', { message: `This conversation runs on ${cfg.label}. Start a new conversation to use ${PROVIDER_BY_ID[active].label}.` });
+      tracked('notice', { message: tr(lang, 'This conversation runs on {provider}. Start a new conversation to use {active}.', { provider: tr(lang, cfg.label), active: tr(lang, PROVIDER_BY_ID[active].label) }) });
     }
 
     const prevHash = chat.snapshotHash;
+    const prevLang = chat.lang;
     let result;
     try {
       requireConfigured(cfg);
       const client = clientFor(cfg);
-      cfg = await withModel(cfg, client, tracked);
+      cfg = await withModel(cfg, client, tracked, lang);
       display.model = cfg.model;
-      const userBlocks = [...contextBlocks(chat, section), text];
+      const userBlocks = [...contextBlocks(chat, section, lang), text];
       const system = mode === 'interview' ? INTERVIEW_SYSTEM : cfg.compactPrompt ? COACH_SYSTEM_COMPACT : COACH_SYSTEM;
       const run = cfg.kind === 'anthropic' ? runAnthropicTurn : runOpenAITurn;
       result = await run({
@@ -507,9 +527,11 @@ export function createAI({ store, rootDir, makeClient }) {
         emit: tracked,
         signal,
         maxIterations: MAX_ITERATIONS,
+        say: (key, vars) => tr(lang, key, vars),
       });
     } catch (err) {
       chat.snapshotHash = prevHash; // nothing from this turn is kept
+      chat.lang = prevLang;
       err.provider = err.provider || cfg;
       throw err;
     }
@@ -532,7 +554,7 @@ export function createAI({ store, rootDir, makeClient }) {
 
   async function setProposalStatus(conversationId, proposalId, statusValue) {
     const chat = await store.loadChat(conversationId);
-    if (!chat) throw Object.assign(new Error('Conversation not found'), { status: 404 });
+    if (!chat) throw i18nError(404, 'Conversation not found');
     for (const d of chat.display) for (const p of d.proposals || []) if (p.id === proposalId) p.status = statusValue;
     await store.saveChat(chat);
     return { ok: true };

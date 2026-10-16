@@ -4,6 +4,8 @@
 // character) → dimensions → complexity → arc → symbol → genre → action
 // → performance → relationships.
 
+import { t } from './i18n.js';
+
 export const SCHEMA_VERSION = 1;
 
 export function uid(prefix = 'id') {
@@ -183,5 +185,5 @@ export function isFilled(v) {
 }
 
 export function displayName(c) {
-  return (c && c.name && c.name.trim()) || 'Unnamed character';
+  return (c && c.name && c.name.trim()) || t('Unnamed character');
 }

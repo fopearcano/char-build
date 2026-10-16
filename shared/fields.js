@@ -5,6 +5,7 @@
 import * as K from './catalog.js';
 import { SECTIONS, sectionFields } from './sections.js';
 import { getPath, setPath, uid, isPlainObject } from './model.js';
+import { t, getLocale } from './i18n.js';
 
 const LIST_SHAPES = {
   dimensions: {
@@ -46,10 +47,12 @@ const LIST_SHAPES = {
   },
 };
 
-let INDEX = null;
+// Labels follow the active language, so the index is cached per locale.
+const INDEX = new Map();
 
 export function fieldIndex() {
-  if (INDEX) return INDEX;
+  const cached = INDEX.get(getLocale());
+  if (cached) return cached;
   const idx = {};
   const add = (path, def) => {
     if (!idx[path]) idx[path] = def;
@@ -78,7 +81,7 @@ export function fieldIndex() {
           break;
         case 'trait':
           add(f.path, { kind: 'text', label, section: s.id });
-          add(`outer.expressed.${f.key}`, { kind: 'boolean', label: `${label} is dramatized`, section: s.id });
+          add(`outer.expressed.${f.key}`, { kind: 'boolean', label: t('{label} is dramatized', { label }), section: s.id });
           break;
         case 'custom':
           break;
@@ -88,15 +91,15 @@ export function fieldIndex() {
     }
   }
   for (const f of K.ANTAGONISM_FORCES) {
-    add(`complexity.antagonism.${f.id}`, { kind: 'number', min: 0, max: 10, label: `Antagonism: ${f.label}`, section: 'complexity' });
-    add(`complexity.antagonismNotes.${f.id}`, { kind: 'text', label: `Antagonism note: ${f.label}`, section: 'complexity' });
+    add(`complexity.antagonism.${f.id}`, { kind: 'number', min: 0, max: 10, label: t('Antagonism: {force}', { force: f.label }), section: 'complexity' });
+    add(`complexity.antagonismNotes.${f.id}`, { kind: 'text', label: t('Antagonism note: {force}', { force: f.label }), section: 'complexity' });
   }
-  add('complexity.capacity', { kind: 'number', min: 0, max: 10, label: 'Protagonist capacity', section: 'complexity' });
-  add('arc.dimensionId', { kind: 'ref-dimension', label: 'Arc dimension', section: 'arc' });
-  add('genre.coreCastRole', { kind: 'text', label: 'Core-cast position', section: 'genre' });
-  add('action.mo.theme', { kind: 'enum', options: K.MO_THEMES.map((m) => m.id), label: 'MO theme', section: 'action' });
-  for (const [path, shape] of Object.entries(LIST_SHAPES)) add(path, { kind: 'list', ...shape });
-  INDEX = idx;
+  add('complexity.capacity', { kind: 'number', min: 0, max: 10, label: t('Protagonist capacity'), section: 'complexity' });
+  add('arc.dimensionId', { kind: 'ref-dimension', label: t('Arc dimension'), section: 'arc' });
+  add('genre.coreCastRole', { kind: 'text', label: t('Core-cast position'), section: 'genre' });
+  add('action.mo.theme', { kind: 'enum', options: K.MO_THEMES.map((m) => m.id), label: t('MO theme'), section: 'action' });
+  for (const [path, shape] of Object.entries(LIST_SHAPES)) add(path, { kind: 'list', ...shape, label: t(shape.label) });
+  INDEX.set(getLocale(), idx);
   return idx;
 }
 
@@ -104,13 +107,13 @@ export function describeFieldIndex(section) {
   const lines = [];
   for (const [path, d] of Object.entries(fieldIndex())) {
     if (section && d.section !== section) continue;
-    let t;
-    if (d.kind === 'number') t = `number ${d.min}..${d.max}`;
-    else if (d.kind === 'enum') t = `one of [${d.options.join(', ')}]`;
-    else if (d.kind === 'multi') t = `array of [${d.options.join(', ')}]`;
-    else if (d.kind === 'list') t = `list; append items {${Object.entries(d.item).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.enum ? v.enum.join('|') : `${v.min}..${v.max}`}`).join(', ')}}`;
-    else t = d.kind;
-    lines.push(`${path} — ${d.label} — ${t}`);
+    let type;
+    if (d.kind === 'number') type = `number ${d.min}..${d.max}`;
+    else if (d.kind === 'enum') type = `one of [${d.options.join(', ')}]`;
+    else if (d.kind === 'multi') type = `array of [${d.options.join(', ')}]`;
+    else if (d.kind === 'list') type = `list; append items {${Object.entries(d.item).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.enum ? v.enum.join('|') : `${v.min}..${v.max}`}`).join(', ')}}`;
+    else type = d.kind;
+    lines.push(`${path} — ${d.label} — ${type}`);
   }
   return lines.join('\n');
 }

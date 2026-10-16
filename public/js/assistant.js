@@ -5,7 +5,10 @@
 import * as K from '/shared/catalog.js';
 import { fieldIndex } from '/shared/fields.js';
 import { displayName } from '/shared/model.js';
-import { esc, attr, icon, mdLite, toast, timeAgo, autoGrow } from './ui.js';
+import { esc, attr, icon, mdLite, toast, timeAgo, autoGrow, tHtml } from './ui.js';
+import { t, tn, getLocale, DEFAULT_LOCALE } from '/shared/i18n.js';
+
+// English source strings; translated when rendered.
 
 const COACH_PROMPTS = [
   ['What’s weakest?', 'Run the McKee diagnostics and tell me the three most important things to fix about this character, then propose fixes.'],
@@ -28,6 +31,19 @@ const INTERVIEW_PROMPTS = [
   'What’s your plan for the next year?',
 ];
 
+const STATUS_LABELS = { applied: () => t('applied'), dismissed: () => t('dismissed'), pending: () => t('pending') };
+const statusLabel = (st) => STATUS_LABELS[st]?.() || st;
+
+// Tool badges are rebuilt from the tool name so they follow the language.
+function toolLabel(tool) {
+  if (tool.name === 'search_mckee_book' && tool.query) return t('Searched the book: “{query}”', { query: tool.query });
+  if (tool.name === 'analyze_character') return t('Ran the McKee diagnostics');
+  return t(tool.label || tool.name);
+}
+
+const EFFORT_LABELS = { low: () => t('low'), medium: () => t('medium'), high: () => t('high'), xhigh: () => t('extra high'), max: () => t('max'), minimal: () => t('minimal') };
+const effortLabel = (e) => EFFORT_LABELS[e]?.() || e;
+
 export class Assistant {
   constructor(opts) {
     this.opts = opts;
@@ -42,7 +58,7 @@ export class Assistant {
     this.el = document.createElement('aside');
     this.el.className = 'coach-drawer';
     this.el.id = 'assistant';
-    this.el.setAttribute('aria-label', 'AI coach');
+    this.el.setAttribute('aria-label', t('AI coach'));
     this.el.hidden = true;
     this.el.__assistant = this;
     document.body.appendChild(this.el);
@@ -135,14 +151,15 @@ export class Assistant {
     if (!this.open) return;
     const c = this.ctx.character;
     const ai = this.opts.getAI() || {};
-    const tabs = [['coach', 'Coach', 'sparkle'], ['interview', 'Interview', 'mic'], ['book', 'Book', 'book'], ['settings', '', 'gear']];
+    const tabs = [['coach', t('Coach'), 'sparkle'], ['interview', t('Interview'), 'mic'], ['book', t('Book'), 'book'], ['settings', '', 'gear']];
+    this.el.setAttribute('aria-label', t('AI coach'));
     const scrollTop = this.el.querySelector('.as-msgs')?.scrollTop;
     const draft = this.el.querySelector('#as-input')?.value;
     this.el.innerHTML = `<header class="as-head">
-        <div class="as-title">${icon('sparkle')}<div><b>McKee coach</b><small>${c ? `for ${esc(displayName(c))}` : 'open a character to begin'}</small>
-          ${ai.providerLabel ? `<button class="as-via" data-as="tab" data-tab="settings" title="Change AI provider">${esc(ai.providerLabel)}${ai.model ? ` · ${esc(ai.model)}` : ''}${ai.configured ? '' : ' · not set up'}</button>` : ''}</div></div>
-        <button class="icon-btn" data-as="close" aria-label="Close coach">${icon('x')}</button></header>
-      <nav class="as-tabs" role="tablist">${tabs.map(([id, label, ic]) => `<button role="tab" aria-selected="${this.tab === id}" class="as-tab ${this.tab === id ? 'on' : ''}" data-as="tab" data-tab="${id}" ${label ? '' : 'aria-label="Settings"'}>${icon(ic)}${label ? `<span>${label}</span>` : ''}</button>`).join('')}</nav>
+        <div class="as-title">${icon('sparkle')}<div><b>${esc(t('McKee coach'))}</b><small>${esc(c ? t('for {name}', { name: displayName(c) }) : t('open a character to begin'))}</small>
+          ${ai.providerLabel ? `<button class="as-via" data-as="tab" data-tab="settings" title="${attr(t('Change AI provider'))}">${esc(t(ai.providerLabel))}${ai.model ? ` · ${esc(ai.model)}` : ''}${ai.configured ? '' : ` · ${esc(t('not set up'))}`}</button>` : ''}</div></div>
+        <button class="icon-btn" data-as="close" aria-label="${attr(t('Close coach'))}">${icon('x')}</button></header>
+      <nav class="as-tabs" role="tablist">${tabs.map(([id, label, ic]) => `<button role="tab" aria-selected="${this.tab === id}" class="as-tab ${this.tab === id ? 'on' : ''}" data-as="tab" data-tab="${id}" ${label ? '' : `aria-label="${attr(t('Settings'))}" title="${attr(t('Settings'))}"`}>${icon(ic)}${label ? `<span>${esc(label)}</span>` : ''}</button>`).join('')}</nav>
       <div class="as-body">${this.tab === 'book' ? this.bookHtml() : this.tab === 'settings' ? this.settingsHtml(ai) : this.chatHtml(this.tab, c, ai)}</div>`;
     const msgs = this.el.querySelector('.as-msgs');
     if (msgs) msgs.scrollTop = scrollTop ?? msgs.scrollHeight;
@@ -154,38 +171,38 @@ export class Assistant {
   }
 
   chatHtml(mode, c, ai) {
-    if (!c) return '<div class="as-empty"><p>Open a character in the builder to get coaching or to interview her.</p></div>';
+    if (!c) return `<div class="as-empty"><p>${esc(t('Open a character in the builder to get coaching or to interview her.'))}</p></div>`;
     const chat = this.chats[mode];
     const history = this.histories[mode];
     const setupHow = ai.canEditSettings === false
-      ? 'Choose an AI provider (Claude, OpenAI, Gemini, a local Ollama model…) and add its key in the coach settings <b>on the computer running CharBuild</b>.'
-      : 'Choose an AI provider — Claude, OpenAI, Gemini, OpenRouter, a local Ollama model and more — in <button class="link" data-as="tab" data-tab="settings">settings</button>, or set a key such as <code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> before <code>npm start</code>.';
-    const setup = ai.configured ? '' : `<div class="as-setup">${icon('info')}<div><b>AI is optional and not configured.</b><p>${setupHow} Everything else in CharBuild works without it.</p></div></div>`;
+      ? tHtml('Choose an AI provider (Claude, OpenAI, Gemini, a local Ollama model…) and add its key in the coach settings {where}.', { where: `<b>${esc(t('on the computer running CharBuild'))}</b>` })
+      : tHtml('Choose an AI provider — Claude, OpenAI, Gemini, OpenRouter, a local Ollama model and more — in {settings}, or set a key such as {keys} before {cmd}.', { settings: `<button class="link" data-as="tab" data-tab="settings">${esc(t('settings'))}</button>`, keys: '<code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code>', cmd: '<code>npm start</code>' });
+    const setup = ai.configured ? '' : `<div class="as-setup">${icon('info')}<div><b>${esc(t('AI is optional and not configured.'))}</b><p>${setupHow} ${esc(t('Everything else in CharBuild works without it.'))}</p></div></div>`;
     const intro = mode === 'coach'
-      ? `<div class="as-intro"><p>Ask anything about building <b>${esc(displayName(c))}</b>. The coach reads the live profile, searches McKee’s book, runs the diagnostics and proposes field values you can apply with one click.</p></div>`
-      : `<div class="as-intro"><p><b>${esc(displayName(c))}</b> sits across from you. McKee’s self-story exercise: ask about high points, low points, dilemmas and beliefs — then judge truth from self-serving spin (Ch. 4). Write in [brackets] to step out of the scene.</p></div>`;
+      ? `<div class="as-intro"><p>${tHtml('Ask anything about building {name}. The coach reads the live profile, searches McKee’s book, runs the diagnostics and proposes field values you can apply with one click.', { name: `<b>${esc(displayName(c))}</b>` })}</p></div>`
+      : `<div class="as-intro"><p>${tHtml('{name} sits across from you. McKee’s self-story exercise: ask about high points, low points, dilemmas and beliefs — then judge truth from self-serving spin (Ch. 4). Write in [brackets] to step out of the scene.', { name: `<b>${esc(displayName(c))}</b>` })}</p></div>`;
     const msgs = (chat?.display || []).map((m) => this.msgHtml(m, chat.id)).join('');
     const prompts = mode === 'coach'
-      ? COACH_PROMPTS.map(([label, p]) => `<button class="chip small" data-as="prompt" data-prompt="${attr(p)}">${esc(label)}</button>`).join('')
-      : INTERVIEW_PROMPTS.map((p) => `<button class="chip small" data-as="prompt" data-prompt="${attr(p)}">${esc(p)}</button>`).join('');
+      ? COACH_PROMPTS.map(([label, p]) => `<button class="chip small" data-as="prompt" data-prompt="${attr(t(p))}">${esc(t(label))}</button>`).join('')
+      : INTERVIEW_PROMPTS.map((p) => `<button class="chip small" data-as="prompt" data-prompt="${attr(t(p))}">${esc(t(p))}</button>`).join('');
     return `${setup}
-      <div class="as-conv"><select data-as="conv" data-mode="${mode}" aria-label="Conversation"><option value="">New conversation</option>${history.map((h) => `<option value="${attr(h.id)}" ${chat?.id === h.id ? 'selected' : ''}>${esc(h.title)} · ${esc(this.providerLabel(h.provider))} · ${esc(timeAgo(h.updatedAt))}</option>`).join('')}</select>
-        <button class="icon-btn sm" data-as="new" data-mode="${mode}" title="New conversation">${icon('plus')}</button>
-        ${chat ? `<button class="icon-btn sm" data-as="delete-conv" data-mode="${mode}" title="Delete conversation">${icon('trash')}</button>` : ''}
-        ${mode === 'interview' && chat?.display?.length ? `<button class="btn sm" data-as="distill">${icon('sparkle')} Distill into profile</button>` : ''}</div>
+      <div class="as-conv"><select data-as="conv" data-mode="${mode}" aria-label="${attr(t('Conversation'))}"><option value="">${esc(t('New conversation'))}</option>${history.map((h) => `<option value="${attr(h.id)}" ${chat?.id === h.id ? 'selected' : ''}>${esc(h.title)} · ${esc(this.providerLabel(h.provider))} · ${esc(timeAgo(h.updatedAt))}</option>`).join('')}</select>
+        <button class="icon-btn sm" data-as="new" data-mode="${mode}" title="${attr(t('New conversation'))}" aria-label="${attr(t('New conversation'))}">${icon('plus')}</button>
+        ${chat ? `<button class="icon-btn sm" data-as="delete-conv" data-mode="${mode}" title="${attr(t('Delete conversation'))}" aria-label="${attr(t('Delete conversation'))}">${icon('trash')}</button>` : ''}
+        ${mode === 'interview' && chat?.display?.length ? `<button class="btn sm" data-as="distill">${icon('sparkle')} ${esc(t('Distill into profile'))}</button>` : ''}</div>
       <div class="as-msgs" aria-live="polite">${msgs || intro}<div id="as-live"></div></div>
       <div class="as-prompts">${prompts}</div>
       <form class="as-compose" data-as="form" data-mode="${mode}">
-        <textarea id="as-input" rows="2" placeholder="${mode === 'coach' ? 'Ask the coach…' : `Ask ${esc(displayName(c).split(' ')[0])} a question…`}" ${this.busy ? 'disabled' : ''}></textarea>
-        ${this.busy ? `<button type="button" class="btn danger sm" data-as="stop">${icon('stop')} Stop</button>` : `<button type="submit" class="btn primary sm">${icon('send')} Send</button>`}
+        <textarea id="as-input" rows="2" placeholder="${attr(mode === 'coach' ? t('Ask the coach…') : t('Ask {name} a question…', { name: displayName(c).split(' ')[0] }))}" ${this.busy ? 'disabled' : ''}></textarea>
+        ${this.busy ? `<button type="button" class="btn danger sm" data-as="stop">${icon('stop')} ${esc(t('Stop'))}</button>` : `<button type="submit" class="btn primary sm">${icon('send')} ${esc(t('Send'))}</button>`}
       </form>`;
   }
 
   msgHtml(m, chatId) {
     if (m.role === 'user') return `<div class="msg user"><div class="bubble">${mdLite(m.text)}</div></div>`;
     return `<div class="msg assistant">
-      ${m.thinking ? `<details class="thinking"><summary>Reasoning</summary><div>${mdLite(m.thinking)}</div></details>` : ''}
-      ${(m.tools || []).map((t) => `<div class="tool-badge">${icon(t.name === 'search_mckee_book' ? 'search' : 'chart')}<span>${esc(t.label)}</span>${t.results?.length ? `<small>${esc(t.results.map((r) => r.chapter).filter((v, i, a) => a.indexOf(v) === i).join(' · '))}</small>` : ''}</div>`).join('')}
+      ${m.thinking ? `<details class="thinking"><summary>${esc(t('Reasoning'))}</summary><div>${mdLite(m.thinking)}</div></details>` : ''}
+      ${(m.tools || []).map((tool) => `<div class="tool-badge">${icon(tool.name === 'search_mckee_book' ? 'search' : 'chart')}<span>${esc(toolLabel(tool))}</span>${tool.results?.length ? `<small>${esc(tool.results.map((r) => r.chapter).filter((v, i, a) => a.indexOf(v) === i).join(' · '))}</small>` : ''}</div>`).join('')}
       ${(m.notices || []).map((n) => `<div class="notice">${icon('info')}<span>${esc(n)}</span></div>`).join('')}
       ${m.text ? `<div class="bubble">${mdLite(m.text)}</div>` : ''}
       ${(m.proposals || []).map((p) => this.proposalHtml(p, chatId)).join('')}
@@ -199,18 +216,18 @@ export class Assistant {
       const m = p.member;
       const circle = K.CIRCLES.find((x) => x.id === m.circle)?.label || m.circle;
       return `<div class="proposal cast ${done ? 'done' : ''}" data-pid="${attr(p.id)}" data-chat="${attr(chatId || '')}">
-        <header>${icon('users')}<b>${esc(m.name)}</b><span class="tag">${esc(circle)}</span>${done ? `<span class="status ${p.status}">${p.status}</span>` : ''}</header>
+        <header>${icon('users')}<b>${esc(m.name)}</b><span class="tag">${esc(circle)}</span>${done ? `<span class="status ${p.status}">${esc(statusLabel(p.status))}</span>` : ''}</header>
         <p><b>${esc(m.roleLabel)}</b>${m.logline ? ` — ${esc(m.logline)}` : ''}</p>
-        ${m.draws ? `<p class="muted">Draws out: ${esc(m.draws)}</p>` : ''}
+        ${m.draws ? `<p class="muted">${esc(t('Draws out: {what}', { what: m.draws }))}</p>` : ''}
         <p class="rationale">${esc(m.reason)}</p>
-        ${done ? '' : `<footer><button class="btn primary sm" data-as="add-cast">${icon('plus')} Add to cast</button><button class="btn ghost sm" data-as="dismiss">Dismiss</button></footer>`}</div>`;
+        ${done ? '' : `<footer><button class="btn primary sm" data-as="add-cast">${icon('plus')} ${esc(t('Add to cast'))}</button><button class="btn ghost sm" data-as="dismiss">${esc(t('Dismiss'))}</button></footer>`}</div>`;
     }
     const idx = fieldIndex();
     return `<div class="proposal ${done ? 'done' : ''}" data-pid="${attr(p.id)}" data-chat="${attr(chatId || '')}">
-      <header>${icon('sparkle')}<b>${esc(p.summary || 'Proposed updates')}</b>${done ? `<span class="status ${p.status}">${p.status}</span>` : ''}</header>
+      <header>${icon('sparkle')}<b>${esc(p.summary || t('Proposed updates'))}</b>${done ? `<span class="status ${p.status}">${esc(statusLabel(p.status))}</span>` : ''}</header>
       <ul>${p.updates.map((u, i) => `<li><label><input type="checkbox" data-u="${i}" ${done ? 'disabled' : 'checked'}>
-        <span class="pu"><span class="pu-label">${esc(u.label || idx[u.path]?.label || u.path)}</span><span class="pu-val">${esc(this.preview(u))}</span>${u.rationale ? `<small>${esc(u.rationale)}</small>` : ''}</span></label></li>`).join('')}</ul>
-      ${done ? '' : `<footer><button class="btn primary sm" data-as="apply">${icon('check')} Apply selected</button><button class="btn ghost sm" data-as="dismiss">Dismiss</button></footer>`}</div>`;
+        <span class="pu"><span class="pu-label">${esc(idx[u.path]?.label || u.label || u.path)}</span><span class="pu-val">${esc(this.preview(u))}</span>${u.rationale ? `<small>${esc(u.rationale)}</small>` : ''}</span></label></li>`).join('')}</ul>
+      ${done ? '' : `<footer><button class="btn primary sm" data-as="apply">${icon('check')} ${esc(t('Apply selected'))}</button><button class="btn ghost sm" data-as="dismiss">${esc(t('Dismiss'))}</button></footer>`}</div>`;
   }
 
   preview(u) {
@@ -227,12 +244,12 @@ export class Assistant {
     };
     if (def?.kind === 'list') {
       const item = v || {};
-      const text = item.positive ? `${item.positive} / ${item.negative}${item.defining ? ' ★ defining' : ''}` : item.label ? `${item.label} (${item.charge > 0 ? '+' : ''}${item.charge})` : item.title || item.with || item.persona || JSON.stringify(item);
-      return `${u.op === 'append' ? 'Add: ' : ''}${text}`;
+      const text = item.positive ? `${item.positive} / ${item.negative}${item.defining ? ` ★ ${t('defining')}` : ''}` : item.label ? `${item.label} (${item.charge > 0 ? '+' : ''}${item.charge})` : item.title || item.with || item.persona || JSON.stringify(item);
+      return u.op === 'append' ? t('Add: {item}', { item: text }) : text;
     }
     if (Array.isArray(v)) return `${u.op === 'append' ? '+ ' : ''}${v.map(lbl).join(', ')}`;
     if (def?.kind === 'enum') return lbl(v);
-    if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+    if (typeof v === 'boolean') return v ? t('Yes') : t('No');
     const s = String(v ?? '');
     return s.length > 240 ? `${s.slice(0, 239)}…` : s;
   }
@@ -240,14 +257,15 @@ export class Assistant {
   bookHtml() {
     const r = this.bookResults;
     const status = this.opts.getAI()?.book;
-    return `<form class="book-search" data-as="book-form"><input id="book-q" class="inp" placeholder="Search McKee’s CHARACTER — e.g. “defining dimension”" value="${attr(r?.q || '')}"><button class="btn sm" type="submit">${icon('search')}</button></form>
+    return `<form class="book-search" data-as="book-form"><input id="book-q" class="inp" placeholder="${attr(t('Search McKee’s CHARACTER — e.g. “defining dimension”'))}" value="${attr(r?.q || '')}"><button class="btn sm" type="submit" aria-label="${attr(t('Search'))}">${icon('search')}</button></form>
+      ${getLocale() !== DEFAULT_LOCALE ? `<p class="help book-lang">${esc(t('The book is the original English edition: passages are shown in English, and search terms in your language are matched to McKee’s vocabulary.'))}</p>` : ''}
       ${status && !status.available ? `<p class="as-empty">${esc(status.reason)}</p>` : ''}
       <div class="book-results">${r ? (r.results.length ? r.results.map((x) => `<article class="passage"><header><b>${esc(x.chapter)}</b>${x.section ? `<span>${esc(x.section)}</span>` : ''}</header><p>${esc(x.text)}</p>
-        <button class="link" data-as="ask-passage" data-q="${attr(`${x.chapter}${x.section ? ` — ${x.section}` : ''}`)}">Ask the coach how this applies →</button></article>`).join('') : '<p class="as-empty">No passages found.</p>') : `<p class="as-empty">Searches your own copy of the book in <code>docs/</code> — no AI key needed.</p>`}</div>`;
+        <button class="link" data-as="ask-passage" data-q="${attr(`${x.chapter}${x.section ? ` — ${x.section}` : ''}`)}">${esc(t('Ask the coach how this applies →'))}</button></article>`).join('') : `<p class="as-empty">${esc(t('No passages found.'))}</p>`) : `<p class="as-empty">${tHtml('Searches your own copy of the book in {docs} — no AI key needed.', { docs: '<code>docs/</code>' })}</p>`}</div>`;
   }
 
   providerLabel(id) {
-    return (this.opts.getAI()?.providers || []).find((p) => p.id === (id || 'anthropic'))?.label || id || 'Anthropic Claude';
+    return t((this.opts.getAI()?.providers || []).find((p) => p.id === (id || 'anthropic'))?.label || id || 'Anthropic Claude');
   }
 
   selectedProvider(ai) {
@@ -260,35 +278,39 @@ export class Assistant {
     const dis = locked ? 'disabled' : '';
     const providers = ai.providers || [];
     const sel = this.selectedProvider(ai);
-    if (!sel) return '<p class="as-empty">No AI providers available.</p>';
+    if (!sel) return `<p class="as-empty">${esc(t('No AI providers available.'))}</p>`;
     const inUse = sel.id === ai.provider;
-    const groups = [['cloud', 'Cloud APIs'], ['local', 'Local — runs on the CharBuild host'], ['other', 'Other']];
-    const options = groups.map(([g, label]) => `<optgroup label="${attr(label)}">${providers.filter((p) => p.group === g).map((p) => `<option value="${attr(p.id)}" ${p.id === sel.id ? 'selected' : ''}>${esc(p.label)}${p.configured ? ' ✓' : ''}${p.id === ai.provider ? ' — in use' : ''}</option>`).join('')}</optgroup>`).join('');
-    const keyState = sel.source === 'none' ? (sel.needsKey ? 'No key yet.' : 'No key needed.') : `Key from ${sel.source}${sel.keyHint ? ` (${sel.keyHint})` : ''}.`;
+    const groups = [['cloud', t('Cloud APIs')], ['local', t('Local — runs on the CharBuild host')], ['other', t('Other')]];
+    const options = groups.map(([g, label]) => `<optgroup label="${attr(label)}">${providers.filter((p) => p.group === g).map((p) => `<option value="${attr(p.id)}" ${p.id === sel.id ? 'selected' : ''}>${esc(t(p.label))}${p.configured ? ' ✓' : ''}${p.id === ai.provider ? ` — ${esc(t('in use'))}` : ''}</option>`).join('')}</optgroup>`).join('');
+    const envName = sel.source.match(/^env \((.+)\)$/)?.[1];
+    const keyState = sel.source === 'none'
+      ? (sel.needsKey ? t('No key yet.') : t('No key needed.'))
+      : envName ? t('Key from the environment variable {name}{hint}.', { name: envName, hint: sel.keyHint ? ` (${sel.keyHint})` : '' })
+        : t('Key saved in the settings{hint}.', { hint: sel.keyHint ? ` (${sel.keyHint})` : '' });
     const loaded = this.modelLists?.[sel.id] || [];
     const suggestions = [...new Set([...(sel.suggestions || []), ...loaded])];
     const effortField = sel.kind === 'anthropic'
-      ? `<label class="field"><span class="lbl">Effort</span><select class="inp" id="as-effort" ${dis}>${['low', 'medium', 'high', 'xhigh', 'max'].map((e) => `<option ${sel.effort === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>`
-      : `<label class="field"><span class="lbl">Reasoning effort</span><select class="inp" id="as-reasoning" ${dis}><option value="">Model default</option>${['minimal', 'low', 'medium', 'high'].map((e) => `<option ${sel.reasoningEffort === e ? 'selected' : ''}>${e}</option>`).join('')}</select><span class="help">Only for reasoning models — leave on default otherwise.</span></label>`;
+      ? `<label class="field"><span class="lbl">${esc(t('Effort'))}</span><select class="inp" id="as-effort" ${dis}>${['low', 'medium', 'high', 'xhigh', 'max'].map((e) => `<option value="${e}" ${sel.effort === e ? 'selected' : ''}>${esc(effortLabel(e))}</option>`).join('')}</select></label>`
+      : `<label class="field"><span class="lbl">${esc(t('Reasoning effort'))}</span><select class="inp" id="as-reasoning" ${dis}><option value="">${esc(t('Model default'))}</option>${['minimal', 'low', 'medium', 'high'].map((e) => `<option value="${e}" ${sel.reasoningEffort === e ? 'selected' : ''}>${esc(effortLabel(e))}</option>`).join('')}</select><span class="help">${esc(t('Only for reasoning models — leave on default otherwise.'))}</span></label>`;
     return `<div class="as-settings">
-      <div class="status-row ${ai.configured ? 'ok' : ''}">${icon(ai.configured ? 'check' : 'info')}<div><b>The coach runs on ${esc(ai.providerLabel || 'Claude')}</b><small>${ai.configured ? esc(ai.model || 'first available model') : 'Not set up yet — CharBuild works fully without AI.'}</small></div></div>
-      ${locked ? `<div class="as-setup">${icon('info')}<div><b>Read-only on this device.</b><p>You’re connected over the network. AI providers, keys and models can only be changed on the computer running CharBuild (or start it with <code>ALLOW_REMOTE_SETTINGS=1</code>).</p></div></div>` : ''}
-      <label class="field"><span class="lbl">Provider</span><select class="inp" id="as-provider">${options}</select></label>
+      <div class="status-row ${ai.configured ? 'ok' : ''}">${icon(ai.configured ? 'check' : 'info')}<div><b>${esc(t('The coach runs on {provider}', { provider: t(ai.providerLabel || 'Claude') }))}</b><small>${esc(ai.configured ? (ai.model || t('first available model')) : t('Not set up yet — CharBuild works fully without AI.'))}</small></div></div>
+      ${locked ? `<div class="as-setup">${icon('info')}<div><b>${esc(t('Read-only on this device.'))}</b><p>${tHtml('You’re connected over the network. AI providers, keys and models can only be changed on the computer running CharBuild (or start it with {flag}).', { flag: '<code>ALLOW_REMOTE_SETTINGS=1</code>' })}</p></div></div>` : ''}
+      <label class="field"><span class="lbl">${esc(t('Provider'))}</span><select class="inp" id="as-provider">${options}</select></label>
       <div class="prov-card">
-        ${sel.note ? `<p class="help">${esc(sel.note)}</p>` : ''}
-        <label class="field"><span class="lbl">API key${sel.needsKey ? '' : ' <small>(optional)</small>'}</span><input class="inp" type="password" id="as-key" autocomplete="off" placeholder="${attr(sel.source === 'settings' ? 'Saved — type a new key to replace it' : sel.source.startsWith('env') ? 'Using the environment key — type to override' : 'Paste the key')}" ${dis}></label>
-        <p class="help">${esc(keyState)}${sel.keyUrl ? ` <a href="${attr(sel.keyUrl)}" target="_blank" rel="noopener">Get a key ↗</a>` : ''} Or set <code>${esc(sel.keyEnv?.[0] || '')}</code>.</p>
-        ${sel.kind === 'openai' ? `<label class="field"><span class="lbl">Base URL</span><input class="inp" id="as-base" value="${attr(sel.baseURL)}" placeholder="${attr(sel.defaultBaseURL || 'http://host:port/v1')}" ${dis}></label>` : ''}
-        <div class="field"><label class="lbl" for="as-model">Model</label><div class="model-row"><input class="inp" id="as-model" list="as-models" value="${attr(sel.model)}" placeholder="${attr(sel.defaultModel || 'auto — first available model')}" ${dis}><button class="btn sm" data-as="load-models">Load models</button></div>
+        ${sel.note ? `<p class="help">${esc(t(sel.note))}</p>` : ''}
+        <label class="field"><span class="lbl">${esc(t('API key'))}${sel.needsKey ? '' : ` <small>${esc(t('(optional)'))}</small>`}</span><input class="inp" type="password" id="as-key" autocomplete="off" placeholder="${attr(sel.source === 'settings' ? t('Saved — type a new key to replace it') : sel.source.startsWith('env') ? t('Using the environment key — type to override') : t('Paste the key'))}" ${dis}></label>
+        <p class="help">${esc(keyState)}${sel.keyUrl ? ` <a href="${attr(sel.keyUrl)}" target="_blank" rel="noopener">${esc(t('Get a key ↗'))}</a>` : ''} ${tHtml('Or set {env}.', { env: `<code>${esc(sel.keyEnv?.[0] || '')}</code>` })}</p>
+        ${sel.kind === 'openai' ? `<label class="field"><span class="lbl">${esc(t('Base URL'))}</span><input class="inp" id="as-base" value="${attr(sel.baseURL)}" placeholder="${attr(sel.defaultBaseURL || 'http://host:port/v1')}" ${dis}></label>` : ''}
+        <div class="field"><label class="lbl" for="as-model">${esc(t('Model'))}</label><div class="model-row"><input class="inp" id="as-model" list="as-models" value="${attr(sel.model)}" placeholder="${attr(sel.defaultModel || t('auto — first available model'))}" ${dis}><button class="btn sm" data-as="load-models">${esc(t('Load models'))}</button></div>
           <datalist id="as-models">${suggestions.map((m) => `<option value="${attr(m)}"></option>`).join('')}</datalist>
-          ${loaded.length ? `<span class="help">${loaded.length} models available — start typing to filter.</span>` : ''}</div>
+          ${loaded.length ? `<span class="help">${esc(t('{n} models available — start typing to filter.', { n: loaded.length }))}</span>` : ''}</div>
         ${effortField}
       </div>
-      <div class="row-btns">${locked ? '' : `<button class="btn primary sm" data-as="save-settings">${inUse ? 'Save' : `Save &amp; use ${esc(sel.label)}`}</button>`}<button class="btn sm" data-as="test">Test connection</button>${sel.source === 'settings' && !locked ? '<button class="btn ghost sm" data-as="clear-key">Remove saved key</button>' : ''}</div>
+      <div class="row-btns">${locked ? '' : `<button class="btn primary sm" data-as="save-settings">${esc(inUse ? t('Save') : t('Save & use {provider}', { provider: t(sel.label) }))}</button>`}<button class="btn sm" data-as="test">${esc(t('Test connection'))}</button>${sel.source === 'settings' && !locked ? `<button class="btn ghost sm" data-as="clear-key">${esc(t('Remove saved key'))}</button>` : ''}</div>
       <p id="as-test" class="help"></p>
-      <details class="prov-list"><summary>All providers</summary><ul>${providers.map((p) => `<li class="${p.configured ? 'on' : ''}"><b>${esc(p.label)}</b><span>${p.configured ? (p.source.startsWith('env') ? 'key in environment' : p.needsKey ? 'key saved' : 'ready') : p.needsKey ? 'no key' : 'needs a base URL'}</span>${p.id === ai.provider ? '<em>in use</em>' : ''}</li>`).join('')}</ul></details>
-      <p class="help">Keys are stored on the host in <code>data/settings.json</code> and never sent back to the browser. Each conversation keeps the provider it started with.</p>
-      <p class="help">Book search: ${ai.book?.available ? `${ai.book.passages} passages indexed from <code>${esc(ai.book.file)}</code>.` : esc(ai.book?.reason || 'unavailable')}</p>
+      <details class="prov-list"><summary>${esc(t('All providers'))}</summary><ul>${providers.map((p) => `<li class="${p.configured ? 'on' : ''}"><b>${esc(t(p.label))}</b><span>${esc(p.configured ? (p.source.startsWith('env') ? t('key in environment') : p.needsKey ? t('key saved') : t('ready')) : p.needsKey ? t('no key') : t('needs a base URL'))}</span>${p.id === ai.provider ? `<em>${esc(t('in use'))}</em>` : ''}</li>`).join('')}</ul></details>
+      <p class="help">${tHtml('Keys are stored on the host in {file} and never sent back to the browser. Each conversation keeps the provider it started with.', { file: '<code>data/settings.json</code>' })}</p>
+      <p class="help">${ai.book?.available ? tHtml('Book search: {n} passages indexed from {file}.', { n: ai.book.passages, file: `<code>${esc(ai.book.file)}</code>` }) : `${esc(t('Book search:'))} ${esc(ai.book?.reason || t('unavailable'))}`}</p>
     </div>`;
   }
 
@@ -344,7 +366,7 @@ export class Assistant {
       else if (a === 'load-models') await this.loadModels();
       else if (a === 'ask-passage') {
         this.tab = 'coach';
-        this.ask(`McKee writes about “${el.dataset.q}”. How does that apply to this character? Be specific and propose changes.`);
+        this.ask(t('McKee writes about “{topic}”. How does that apply to this character? Be specific and propose changes.', { topic: el.dataset.q }));
       }
     } catch (err) {
       toast(err.message, 'error');
@@ -363,6 +385,7 @@ export class Assistant {
       chat = { id: null, mode, display: [] };
       this.chats[mode] = chat;
     }
+    const isNew = !chat.id;
     const userMsg = { role: 'user', text };
     const live = { role: 'assistant', text: '', thinking: '', tools: [], proposals: [], notices: [] };
     chat.display.push(userMsg, live);
@@ -387,7 +410,7 @@ export class Assistant {
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CharBuild-Lang': getLocale() },
         body: JSON.stringify({ conversationId: chat.id, mode, characterId: c.id, message: text, section: this.ctx.section }),
         signal: this.abort.signal,
       });
@@ -427,7 +450,7 @@ export class Assistant {
         }
       }
     } catch (err) {
-      failed = err.name === 'AbortError' ? 'Stopped.' : err.message;
+      failed = err.name === 'AbortError' ? t('Stopped.') : err.message;
     } finally {
       this.busy = false;
       this.abort = null;
@@ -438,6 +461,11 @@ export class Assistant {
       // The server keeps nothing from a failed turn, so drop it here too
       // and give the text back to the composer for a retry.
       chat.display.splice(chat.display.indexOf(userMsg), 2);
+      if (isNew && chat.id) {
+        // The server didn't keep the conversation it announced.
+        this.histories[mode] = this.histories[mode].filter((h) => h.id !== chat.id);
+        chat.id = null;
+      }
       if (!chat.display.length && !chat.id) this.chats[mode] = null;
       this.render();
       const msgs = this.el.querySelector('.as-msgs');
@@ -455,7 +483,7 @@ export class Assistant {
     if (!chat?.display?.length) return;
     const transcript = chat.display.map((m) => `${m.role === 'user' ? 'WRITER' : 'CHARACTER'}: ${m.text}`).join('\n\n').slice(-16000);
     this.tab = 'coach';
-    this.ask(`Here is my interview with the character (McKee's self-story exercise). Separate what she believes from what is true, note her self-deceptions, and propose updates to the profile (self-story, selves, desires, dimensions, subtext) based on it.\n\n<interview>\n${transcript}\n</interview>`);
+    this.ask(`${t('Here is my interview with the character (McKee’s self-story exercise). Separate what she believes from what is true, note her self-deceptions, and propose updates to the profile (self-story, selves, desires, dimensions, subtext) based on it.')}\n\n<interview>\n${transcript}\n</interview>`);
   }
 
   findProposal(card) {
@@ -481,12 +509,12 @@ export class Assistant {
     const { p } = this.findProposal(card);
     if (!p) return;
     const chosen = [...card.querySelectorAll('input[data-u]')].filter((x) => x.checked).map((x) => p.updates[Number(x.dataset.u)]);
-    if (!chosen.length) return toast('Select at least one update', 'info');
+    if (!chosen.length) return toast(t('Select at least one update'), 'info');
     await this.opts.flushSaves();
     const updated = await this.opts.api('PATCH', `/api/characters/${p.characterId}`, { updates: chosen.map(({ path, op, value }) => ({ path, op, value })) });
     this.opts.onCharacterUpdated(updated);
     await this.setStatus(card, 'applied');
-    toast(`Applied ${chosen.length} update${chosen.length === 1 ? '' : 's'}`, 'success');
+    toast(tn(chosen.length, 'Applied {n} update', 'Applied {n} updates'), 'success');
   }
 
   async addCast(card) {
@@ -506,7 +534,7 @@ export class Assistant {
       this.opts.onCharacterUpdated(updated);
     }
     await this.setStatus(card, 'applied');
-    toast(`${m.name} added to the cast`, 'success');
+    toast(t('{name} added to the cast', { name: m.name }), 'success');
   }
 
   // ── book & settings ─────────────────────────────────────────────────────
@@ -514,7 +542,7 @@ export class Assistant {
     if (!q?.trim()) return;
     const res = await this.opts.api('GET', `/api/book/search?q=${encodeURIComponent(q)}&limit=6`);
     this.bookResults = { q, results: res.results || [] };
-    if (!res.available) toast(res.reason || 'Book unavailable', 'error');
+    if (!res.available) toast(res.reason || t('Book unavailable'), 'error');
     this.render();
   }
 
@@ -549,10 +577,10 @@ export class Assistant {
       const ai = this.opts.getAI() || {};
       const next = await this.opts.api('PUT', '/api/settings', { providerId: this.selectedProvider(ai)?.id, clearKey: true });
       this.opts.setAI(next);
-      toast('Saved key removed', 'success');
+      toast(t('Saved key removed'), 'success');
     } else {
       const next = await this.persistFields({ activate: true });
-      toast(`Coach now runs on ${next.providerLabel}`, 'success');
+      toast(t('Coach now runs on {provider}', { provider: t(next.providerLabel) }), 'success');
     }
     this.render();
   }
@@ -562,13 +590,13 @@ export class Assistant {
     const id = this.selectedProvider(ai)?.id;
     await this.persistFields();
     const out = this.el.querySelector('#as-test');
-    if (out) out.textContent = 'Loading models…';
+    if (out) out.textContent = t('Loading models…');
     try {
       const res = await this.opts.api('GET', `/api/ai/models?provider=${encodeURIComponent(id)}`);
       this.modelLists = { ...(this.modelLists || {}), [id]: res.models || [] };
       this.render();
       const after = this.el.querySelector('#as-test');
-      if (after) after.innerHTML = `${icon('check')} ${res.models.length} models loaded.`;
+      if (after) after.innerHTML = `${icon('check')} ${esc(t('{n} models loaded.', { n: res.models.length }))}`;
       this.el.querySelector('#as-model')?.focus();
     } catch (err) {
       const after = this.el.querySelector('#as-test');
@@ -582,12 +610,12 @@ export class Assistant {
     await this.persistFields();
     this.render();
     const out = this.el.querySelector('#as-test');
-    if (out) out.textContent = 'Testing…';
+    if (out) out.textContent = t('Testing…');
     const r = await this.opts.api('POST', '/api/ai/test', { provider: id });
     const target = this.el.querySelector('#as-test');
     if (!target) return;
     target.innerHTML = r.ok
-      ? `${icon('check')} Connected to ${esc(r.provider || '')} — ${esc(r.name || r.model)}${r.warning ? `<br>${icon('alert')} ${esc(r.warning)}` : ''}`
+      ? `${icon('check')} ${esc(t('Connected to {provider} — {model}', { provider: t(r.provider || ''), model: r.name || r.model }))}${r.warning ? `<br>${icon('alert')} ${esc(r.warning)}` : ''}`
       : `${icon('alert')} ${esc(r.error)}`;
   }
 }

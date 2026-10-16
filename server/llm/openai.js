@@ -3,6 +3,7 @@
 // streamed, with a manual function-calling loop.
 
 import OpenAI from 'openai';
+import { format, i18nError } from '../../shared/i18n.js';
 
 export function createOpenAIClient(cfg) {
   const defaultHeaders = cfg.id === 'openrouter' ? { 'HTTP-Referer': 'https://github.com/fopearcano/char-build', 'X-Title': 'CharBuild' } : undefined;
@@ -35,7 +36,7 @@ export function toOpenAITools(tools) {
 const isToolsUnsupported = (err) => err?.status === 400 && /tool|function/i.test(err?.message || '');
 
 // Runs one user turn. Returns the provider-format messages to append.
-export async function runOpenAITurn({ client, cfg, system, history, userBlocks, tools, runTool, emit, signal, maxIterations }) {
+export async function runOpenAITurn({ client, cfg, system, history, userBlocks, tools, runTool, emit, signal, maxIterations, say = format }) {
   const turn = [{ role: 'user', content: userBlocks.join('\n\n') }];
   let fnTools = tools?.length ? toOpenAITools(tools) : null;
   let textSoFar = '';
@@ -57,7 +58,7 @@ export async function runOpenAITurn({ client, cfg, system, history, userBlocks, 
       if (fnTools && isToolsUnsupported(err)) {
         // Some (mostly local) models can't call tools; keep coaching without them.
         fnTools = null;
-        emit('notice', { message: `“${cfg.model}” can’t use tools, so book search and one-click proposals are off for this reply.` });
+        emit('notice', { message: say('“{model}” can’t use tools, so book search and one-click proposals are off for this reply.', { model: cfg.model }) });
         i -= 1;
         continue;
       }
@@ -104,8 +105,8 @@ export async function runOpenAITurn({ client, cfg, system, history, userBlocks, 
       type: 'function',
       function: { name: c.name, arguments: c.args || '{}' },
     }));
-    if (finish === 'content_filter') throw Object.assign(new Error(`${cfg.label} filtered this response. Try rephrasing it.`), { status: 422 });
-    if (finish === 'length' && toolCalls.length) throw new Error('A tool call was cut off by the length limit. Try a narrower request.');
+    if (finish === 'content_filter') throw i18nError(422, '{provider} filtered this response. Try rephrasing it.', { provider: cfg.label });
+    if (finish === 'length' && toolCalls.length) throw i18nError(502, 'A tool call was cut off by the length limit. Try a narrower request.');
 
     const assistant = { role: 'assistant', content: content || (toolCalls.length ? null : '') };
     if (toolCalls.length) assistant.tool_calls = toolCalls;
@@ -124,7 +125,7 @@ export async function runOpenAITurn({ client, cfg, system, history, userBlocks, 
         : { error: true, content: JSON.stringify({ INVALID_JSON: tc.function.arguments }) };
       turn.push({ role: 'tool', tool_call_id: tc.id, content: r.error ? `Error: ${r.content}` : r.content });
     }
-    if (i === maxIterations - 1) emit('notice', { message: 'Stopped after several tool rounds.' });
+    if (i === maxIterations - 1) emit('notice', { message: say('Stopped after several tool rounds.') });
   }
   return { messages: turn, stopReason: finish };
 }

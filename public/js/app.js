@@ -5,11 +5,42 @@ import * as K from '/shared/catalog.js';
 import { getPath, setPath, displayName, uid } from '/shared/model.js';
 import { overallProgress, characterChecks, castChecks, expectedSections, traitDensity, antagonismProfile, choiceDepth, definingDimension } from '/shared/analysis.js';
 import { characterMarkdown } from '/shared/export.js';
-import { esc, attr, icon, toast, modal, confirmDialog, promptDialog, download, initials, timeAgo, autoGrow } from './ui.js';
+import { esc, attr, icon, toast, modal, confirmDialog, promptDialog, download, initials, timeAgo, autoGrow, tHtml } from './ui.js';
+import { t, tn, getLocale, setLocale, matchLocale, registerLocale, hasLocale, LOCALES, DEFAULT_LOCALE } from '/shared/i18n.js';
+import { localizeData, en } from '/shared/i18n-data.js';
 import { renderFields, renderStoryFields } from './forms.js';
 import * as V from './viz.js';
 import { renderCastMap, bindCastMap } from './castmap.js';
 import { Assistant } from './assistant.js';
+
+const SAMPLE_ID = 'story_undertow';
+const LANG_KEY = 'charbuild-lang';
+
+// ── Language ─────────────────────────────────────────────────────────────
+// Saved choice, else the browser's languages, else English.
+function preferredLocale() {
+  try {
+    const saved = matchLocale(localStorage.getItem(LANG_KEY));
+    if (saved) return saved;
+  } catch { /* storage unavailable */ }
+  for (const l of navigator.languages || [navigator.language]) {
+    const m = matchLocale(l);
+    if (m) return m;
+  }
+  return DEFAULT_LOCALE;
+}
+
+// Load the dictionary once, then switch the data (catalog, stations) and
+// the interface strings together.
+async function applyLocale(id) {
+  if (id !== DEFAULT_LOCALE && !hasLocale(id)) {
+    const mod = await import(`/shared/locales/${id}.js`);
+    registerLocale(id, mod.default);
+  }
+  localizeData(id);
+  setLocale(id);
+  document.documentElement.lang = id;
+}
 
 const state = {
   stories: [],
@@ -24,7 +55,7 @@ const state = {
 export async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: { 'X-CharBuild-Lang': getLocale(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -62,7 +93,7 @@ async function saveNow(kind, id) {
     state.saveError = false;
   } catch (err) {
     state.saveError = true;
-    toast(`Could not save: ${err.message}`, 'error');
+    toast(t('Could not save: {error}', { error: err.message }), 'error');
     saveTimers.set(`${kind}:${id}`, setTimeout(() => saveNow(kind, id), 4000));
   } finally {
     state.saving -= 1;
@@ -83,7 +114,7 @@ function setSaveStatus(s) {
   const el = document.getElementById('save-status');
   if (!el) return;
   el.dataset.state = s;
-  el.textContent = { pending: 'Editing…', saving: 'Saving…', saved: 'All changes saved', error: 'Save failed — retrying' }[s] || '';
+  el.textContent = { pending: t('Editing…'), saving: t('Saving…'), saved: t('All changes saved'), error: t('Save failed — retrying') }[s] || '';
 }
 
 window.addEventListener('beforeunload', (e) => {
@@ -135,9 +166,9 @@ function render() {
 
 function titleFor(r) {
   if (r.view === 'builder' && charById(r.id)) return `${displayName(charById(r.id))} · ${SECTION_BY_ID[r.section].title} — CharBuild`;
-  if (r.view === 'profile' && charById(r.id)) return `${displayName(charById(r.id))} · Profile — CharBuild`;
+  if (r.view === 'profile' && charById(r.id)) return `${displayName(charById(r.id))} · ${t('Profile')} — CharBuild`;
   if (r.view === 'story' && storyById(r.id)) return `${storyById(r.id).title} — CharBuild`;
-  return 'CharBuild — character builder after McKee';
+  return t('CharBuild — character builder after McKee');
 }
 
 function currentContext() {
@@ -147,27 +178,46 @@ function currentContext() {
 }
 
 function notFound() {
-  return `<main class="page narrow"><div class="card empty-state"><h1>Not found</h1><p>That story or character doesn’t exist (any more).</p><a class="btn primary" href="#/">${icon('home')} Back to library</a></div></main>`;
+  return `<main class="page narrow"><div class="card empty-state"><h1>${esc(t('Not found'))}</h1><p>${esc(t('That story or character doesn’t exist (any more).'))}</p><a class="btn primary" href="#/">${icon('home')} ${esc(t('Back to library'))}</a></div></main>`;
 }
 
 function topbar() {
   const r = state.route;
   const c = ['builder', 'profile'].includes(r.view) ? charById(r.id) : null;
   const story = c ? ctxFor(c).story : r.view === 'story' ? storyById(r.id) : null;
-  const crumbs = [`<a href="#/" class="crumb">${icon('home')}<span>Library</span></a>`];
+  const crumbs = [`<a href="#/" class="crumb">${icon('home')}<span>${esc(t('Library'))}</span></a>`];
   if (story) crumbs.push(`<a href="#/story/${attr(story.id)}" class="crumb">${icon('map')}<span>${esc(story.title)}</span></a>`);
   if (c) crumbs.push(`<a href="#/char/${attr(c.id)}/${r.view === 'builder' ? r.section : 'spark'}" class="crumb"><span class="dot" style="background:${esc(c.color)}"></span><span>${esc(displayName(c))}</span></a>`);
   const aiOn = state.ai?.configured;
   return `<header class="topbar">
-    <a class="brand" href="#/" aria-label="CharBuild home"><span class="logo">${logoSvg()}</span><span class="brand-t"><b>CharBuild</b><small>after McKee’s <i>Character</i></small></span></a>
+    <a class="brand" href="#/" aria-label="${attr(t('CharBuild home'))}"><span class="logo">${logoSvg()}</span><span class="brand-t"><b>CharBuild</b><small>${tHtml('after McKee’s {book}', { book: '<i>Character</i>' })}</small></span></a>
     <nav class="crumbs" aria-label="Breadcrumb">${crumbs.join(`<span class="sep">${icon('chevron')}</span>`)}</nav>
     <div class="top-actions">
       <span id="save-status" class="save-status" data-state="saved" aria-live="polite"></span>
-      ${c ? `<a class="btn ghost sm ${r.view === 'profile' ? 'active' : ''}" href="#/char/${attr(c.id)}/profile">${icon('chart')}<span>Profile</span></a>` : ''}
-      <button class="btn sm coach-btn ${aiOn ? 'on' : ''}" data-action="toggle-assistant" title="AI coach (optional)">${icon('sparkle')}<span>Coach</span></button>
-      <button class="icon-btn" data-action="toggle-theme" aria-label="Toggle dark mode">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>
+      ${c ? `<a class="btn ghost sm ${r.view === 'profile' ? 'active' : ''}" href="#/char/${attr(c.id)}/profile">${icon('chart')}<span>${esc(t('Profile'))}</span></a>` : ''}
+      <button class="btn sm coach-btn ${aiOn ? 'on' : ''}" data-action="toggle-assistant" title="${attr(t('AI coach (optional)'))}">${icon('sparkle')}<span>${esc(t('Coach'))}</span></button>
+      <button class="icon-btn" data-action="toggle-theme" aria-label="${attr(t('Toggle dark mode'))}" title="${attr(t('Toggle dark mode'))}">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>
+      ${langMenu()}
     </div>
   </header>`;
+}
+
+// Top-right language switcher: a button that opens a small menu.
+function langMenu() {
+  const cur = LOCALES.find((l) => l.id === getLocale()) || LOCALES[0];
+  return `<div class="lang-menu">
+    <button class="btn ghost sm lang-btn" data-action="toggle-lang" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-pop" title="${attr(t('Language'))}" aria-label="${attr(t('Language: {name}', { name: cur.label }))}">${icon('globe')}<span>${esc(cur.short)}</span>${icon('chevronDown', 'caret')}</button>
+    <div class="lang-pop" id="lang-pop" role="menu" hidden>${LOCALES.map((l) => `<button role="menuitemradio" aria-checked="${l.id === cur.id}" class="lang-opt ${l.id === cur.id ? 'on' : ''}" data-action="set-lang" data-lang="${attr(l.id)}" lang="${attr(l.id)}"><span class="lang-code">${esc(l.short)}</span><span>${esc(l.label)}</span>${l.id === cur.id ? icon('check') : ''}</button>`).join('')}</div>
+  </div>`;
+}
+
+function setLangMenu(open) {
+  const pop = document.getElementById('lang-pop');
+  const btn = document.querySelector('.lang-btn');
+  if (!pop || !btn) return;
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) (pop.querySelector('.lang-opt.on') || pop.querySelector('.lang-opt'))?.focus();
 }
 
 function logoSvg() {
@@ -183,35 +233,45 @@ function libraryView() {
     return `<article class="story-card card">
       <a class="sc-main" href="#/story/${attr(s.id)}">
         <div class="sc-head"><h2>${esc(s.title)}</h2>${s.format ? `<span class="tag">${esc(s.format)}</span>` : ''}</div>
-        ${s.logline ? `<p class="logline">${esc(s.logline)}</p>` : '<p class="logline muted">No logline yet.</p>'}
+        ${s.logline ? `<p class="logline">${esc(s.logline)}</p>` : `<p class="logline muted">${esc(t('No logline yet.'))}</p>`}
         <div class="gchips">${genres.map((g) => `<span class="gchip ${g.family}">${esc(g.label)}</span>`).join('')}</div>
       </a>
       <div class="sc-cast">${cast.map((c) => `<a class="avatar sm" style="--c:${esc(c.color)}" href="#/char/${attr(c.id)}/spark" title="${attr(displayName(c))}">${esc(initials(displayName(c)))}</a>`).join('')}
-        <button class="avatar sm add" data-action="new-char" data-story="${attr(s.id)}" title="New character">${icon('plus')}</button></div>
-      <footer class="sc-foot"><span>${cast.length} character${cast.length === 1 ? '' : 's'}${prot ? ` · lead: ${esc(displayName(prot))}` : ''}</span><span class="muted">${esc(timeAgo(s.updatedAt))}</span></footer>
+        <button class="avatar sm add" data-action="new-char" data-story="${attr(s.id)}" title="${attr(t('New character'))}" aria-label="${attr(t('New character'))}">${icon('plus')}</button></div>
+      <footer class="sc-foot"><span>${esc(tn(cast.length, '{n} character', '{n} characters'))}${prot ? ` · ${esc(t('lead: {name}', { name: displayName(prot) }))}` : ''}</span><span class="muted">${esc(timeAgo(s.updatedAt))}</span></footer>
     </article>`;
   }).join('');
   const loose = castOf(null);
   return `<main class="page library">
     <section class="hero">
       <div class="hero-text">
-        <p class="eyebrow">Character builder</p>
-        <h1>Design characters from the outside in — and the inside out.</h1>
-        <p class="lede">Sixteen stations that walk Robert McKee’s <i>CHARACTER</i>: characterization and true character, the four selves, dimensions, antagonism, arc and cast design — every choice visualized as you make it, with an optional AI coach grounded in the book.</p>
+        <p class="eyebrow">${esc(t('Character builder'))}</p>
+        <h1>${esc(t('Design characters from the outside in — and the inside out.'))}</h1>
+        <p class="lede">${tHtml('Sixteen stations that walk Robert McKee’s {book}: characterization and true character, the four selves, dimensions, antagonism, arc and cast design — every choice visualized as you make it, with an optional AI coach grounded in the book.', { book: '<i>CHARACTER</i>' })}</p>
         <div class="hero-actions">
-          <button class="btn primary" data-action="new-story">${icon('plus')} New story</button>
-          <button class="btn" data-action="import">${icon('upload')} Import</button>
-          <a class="btn ghost" href="/api/export?download=1">${icon('download')} Export all</a>
-          ${state.stories.some((s) => s.id === 'story_undertow') ? '' : `<button class="btn ghost" data-action="restore-sample">${icon('refresh')} Restore sample</button>`}
+          <button class="btn primary" data-action="new-story">${icon('plus')} ${esc(t('New story'))}</button>
+          <button class="btn" data-action="import">${icon('upload')} ${esc(t('Import'))}</button>
+          <a class="btn ghost" href="/api/export?download=1">${icon('download')} ${esc(t('Export all'))}</a>
+          ${sampleButton()}
         </div>
       </div>
       <div class="hero-map">${methodMap()}</div>
     </section>
-    <h2 class="section-title">Stories</h2>
-    <div class="story-grid-lib">${storyCards || `<div class="card empty-state"><p>No stories yet.</p><button class="btn primary" data-action="new-story">${icon('plus')} Create your first story</button></div>`}</div>
-    ${loose.length ? `<h2 class="section-title">Characters without a story</h2><div class="char-cards">${loose.map(charCard).join('')}</div>` : ''}
-    <footer class="credits">Framework after Robert McKee, <i>${esc(K.BOOK.title)}</i> (${K.BOOK.year}). Guidance is paraphrased with chapter references; book search uses your own copy in <code>docs/</code>.</footer>
+    <h2 class="section-title">${esc(t('Stories'))}</h2>
+    <div class="story-grid-lib">${storyCards || `<div class="card empty-state"><p>${esc(t('No stories yet.'))}</p><button class="btn primary" data-action="new-story">${icon('plus')} ${esc(t('Create your first story'))}</button></div>`}</div>
+    ${loose.length ? `<h2 class="section-title">${esc(t('Characters without a story'))}</h2><div class="char-cards">${loose.map(charCard).join('')}</div>` : ''}
+    <footer class="credits">${tHtml('Framework after Robert McKee, {book} ({year}). Guidance is paraphrased with chapter references; book search uses your own copy in {docs}.', { book: `<i>${esc(K.BOOK.title)}</i>`, year: K.BOOK.year, docs: '<code>docs/</code>' })}</footer>
   </main>`;
+}
+
+// The sample story exists in every interface language; offer to restore it,
+// or to swap it for the version in the current language.
+function sampleButton() {
+  const sample = storyById(SAMPLE_ID);
+  if (!sample) return `<button class="btn ghost" data-action="restore-sample">${icon('refresh')} ${esc(t('Restore sample'))}</button>`;
+  if ((sample.sampleLang || DEFAULT_LOCALE) === getLocale()) return '';
+  const lang = LOCALES.find((l) => l.id === getLocale());
+  return `<button class="btn ghost" data-action="translate-sample">${icon('globe')} ${esc(t('Sample story in {language}', { language: lang?.label || getLocale() }))}</button>`;
 }
 
 function methodMap() {
@@ -226,11 +286,11 @@ function charCard(c) {
   return `<article class="char-card card" style="--c:${esc(c.color)}">
     <a href="#/char/${attr(c.id)}/spark" class="cc-main">
       <span class="avatar">${esc(initials(displayName(c)))}</span>
-      <div class="cc-text"><h3>${esc(displayName(c))}</h3><p>${esc(circle?.label || 'Unplaced')}${c.concept?.roleLabel ? ` · ${esc(c.concept.roleLabel)}` : ''}</p>
+      <div class="cc-text"><h3>${esc(displayName(c))}</h3><p>${esc(circle?.label || t('Unplaced'))}${c.concept?.roleLabel ? ` · ${esc(c.concept.roleLabel)}` : ''}</p>
       ${def ? `<p class="cc-dim"><b>${esc(def.positive)}</b> / <b>${esc(def.negative)}</b></p>` : ''}</div>
       ${V.progressRing(p.ratio, 46, 5, 'var(--c)')}
     </a>
-    <div class="cc-stats"><span title="Dimensions">${(c.dimensions || []).length} dim</span><span title="Known traits">${traitDensity(c).known} traits</span><a href="#/char/${attr(c.id)}/profile">${icon('chart')} profile</a></div>
+    <div class="cc-stats"><span title="${attr(t('Dimensions'))}">${esc(t('{n} dim', { n: (c.dimensions || []).length }))}</span><span title="${attr(t('Known traits'))}">${esc(t('{n} traits', { n: traitDensity(c).known }))}</span><a href="#/char/${attr(c.id)}/profile">${icon('chart')} ${esc(t('profile'))}</a></div>
   </article>`;
 }
 
@@ -243,27 +303,27 @@ function storyView(s) {
   const sorted = [...cast].sort((a, b) => (order[a.cast?.circle] ?? 4) - (order[b.cast?.circle] ?? 4));
   return `<main class="page story-page" data-entity="story" data-id="${attr(s.id)}">
     <section class="story-hero card">
-      <div><p class="eyebrow">Story</p><h1>${esc(s.title)}</h1>${s.logline ? `<p class="logline">${esc(s.logline)}</p>` : ''}
+      <div><p class="eyebrow">${esc(t('Story'))}</p><h1>${esc(s.title)}</h1>${s.logline ? `<p class="logline">${esc(s.logline)}</p>` : ''}
       <div class="gchips">${genres.map((g) => `<span class="gchip ${g.family}" title="${attr(g.coreValue)}">${esc(g.label)}</span>`).join('')}${s.coreValue?.positive ? `<span class="tag">${esc(s.coreValue.positive)} ↔ ${esc(s.coreValue.negative || '?')}</span>` : ''}</div></div>
       <div class="hero-actions">
-        <button class="btn primary" data-action="new-char" data-story="${attr(s.id)}">${icon('plus')} New character</button>
-        <button class="btn ghost" data-action="delete-story" data-id="${attr(s.id)}">${icon('trash')} Delete story</button>
+        <button class="btn primary" data-action="new-char" data-story="${attr(s.id)}">${icon('plus')} ${esc(t('New character'))}</button>
+        <button class="btn ghost" data-action="delete-story" data-id="${attr(s.id)}">${icon('trash')} ${esc(t('Delete story'))}</button>
       </div>
     </section>
     <div class="story-layout">
-      <section class="card castmap-card"><div class="card-head"><h2>Cast map</h2><span class="muted">Drag characters between orbits · click to open · Ch. 6, 17</span></div>
+      <section class="card castmap-card"><div class="card-head"><h2>${esc(t('Cast map'))}</h2><span class="muted">${esc(t('Drag characters between orbits · click to open · Ch. 6, 17'))}</span></div>
         <div id="castmap">${renderCastMap(s, cast)}</div></section>
       <aside class="story-side">
-        <section class="card"><div class="card-head"><h2>Cast design checks</h2></div>${checksList(checks, { empty: 'No cast-level issues found.' })}</section>
+        <section class="card"><div class="card-head"><h2>${esc(t('Cast design checks'))}</h2></div>${checksList(checks, { empty: t('No cast-level issues found.') })}</section>
         ${genres.map((g) => `<section class="card genre-mini"><h3>${esc(g.label)}</h3><p class="gv">${esc(g.coreValue)}</p><p class="muted">${esc(g.coreEvent)} · ${esc(g.coreEmotion)}</p><p class="cast-roles">${g.coreCast.map((r) => {
     const who = cast.filter((c) => c.genre?.coreCastRole === r).map(displayName);
-    return `<span class="cc ${who.length ? 'on' : ''}">${esc(r)}${who.length ? `: ${esc(who.join(', '))}` : ''}</span>`;
+    return `<span class="cc ${who.length ? 'on' : ''}">${esc(t(r))}${who.length ? `: ${esc(who.join(', '))}` : ''}</span>`;
   }).join('')}</p></section>`).join('')}
       </aside>
     </div>
-    <h2 class="section-title">Cast</h2>
-    <div class="char-cards">${sorted.map(charCard).join('')}<button class="char-card card add-card" data-action="new-char" data-story="${attr(s.id)}">${icon('plus')}<span>New character</span></button></div>
-    <h2 class="section-title">Story settings</h2>
+    <h2 class="section-title">${esc(t('Cast'))}</h2>
+    <div class="char-cards">${sorted.map(charCard).join('')}<button class="char-card card add-card" data-action="new-char" data-story="${attr(s.id)}">${icon('plus')}<span>${esc(t('New character'))}</span></button></div>
+    <h2 class="section-title">${esc(t('Story settings'))}</h2>
     <section class="card story-settings"><div class="fields grid2">${renderStoryFields(STORY_FIELDS, s)}</div></section>
   </main>`;
 }
@@ -299,18 +359,18 @@ function builderView(c, sectionId) {
       <header class="station-head">
         <div class="big-num" aria-hidden="true">${section.num}</div>
         <div class="sh-text"><p class="eyebrow">${esc(part.title)} · ${esc(part.subtitle)}</p><h1>${esc(section.title)}</h1><p class="sub">${esc(section.subtitle)}</p>
-        <div class="chapters">${section.chapters.map((n) => `<span class="ch">Ch. ${n} · ${esc(K.CHAPTERS[n])}</span>`).join('')}</div>
-        ${expected ? '' : `<p class="optional-note">${icon('info')} Optional for a ${esc(K.CIRCLES.find((x) => x.id === c.cast?.circle)?.label.toLowerCase() || 'minor')} role — McKee keeps outer-circle roles lean.</p>`}</div>
+        <div class="chapters">${section.chapters.map((n) => `<span class="ch">${esc(t('Ch. {n}', { n }))} · ${esc(K.CHAPTERS[n])}</span>`).join('')}</div>
+        ${expected ? '' : `<p class="optional-note">${icon('info')} ${esc(t('Optional for a {circle} role — McKee keeps outer-circle roles lean.', { circle: K.CIRCLES.find((x) => x.id === c.cast?.circle)?.label.toLowerCase() || t('minor') }))}</p>`}</div>
       </header>
       <section class="principle card">
-        <div class="pr-text"><h3>${icon('book')} McKee’s principle</h3><p>${esc(section.principle)}</p></div>
-        <div class="pr-q"><h4>Ask yourself</h4><ul>${section.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
-        <div class="pr-actions"><button class="btn sm" data-action="ask" data-prompt="brainstorm">${icon('sparkle')} Brainstorm with coach</button><button class="btn ghost sm" data-action="ask" data-prompt="critique">Critique this station</button><button class="btn ghost sm" data-action="book-search" data-q="${attr(section.title)}">${icon('search')} In the book</button></div></div>
+        <div class="pr-text"><h3>${icon('book')} ${esc(t('McKee’s principle'))}</h3><p>${esc(section.principle)}</p></div>
+        <div class="pr-q"><h4>${esc(t('Ask yourself'))}</h4><ul>${section.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
+        <div class="pr-actions"><button class="btn sm" data-action="ask" data-prompt="brainstorm">${icon('sparkle')} ${esc(t('Brainstorm with coach'))}</button><button class="btn ghost sm" data-action="ask" data-prompt="critique">${esc(t('Critique this station'))}</button><button class="btn ghost sm" data-action="book-search" data-q="${attr(en(section, 'title'))}" title="${attr(t('Search the original English text'))}">${icon('search')} ${esc(t('In the book'))}</button></div></div>
       </section>
       ${section.groups.filter((g) => !g.showIf || g.showIf(c, ctx.story)).map((g) => `<section class="group card"><div class="group-head"><h2>${esc(g.title)}</h2>${g.hint ? `<p class="hint">${esc(g.hint)}</p>` : ''}</div><div class="fields">${renderFields(g.fields, c, ctx)}</div></section>`).join('')}
-      <nav class="pager">${prev ? `<a class="btn ghost" href="#/char/${attr(c.id)}/${prev.id}">← ${prev.num} ${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="btn primary" href="#/char/${attr(c.id)}/${next.id}">${next.num} ${esc(next.title)} →</a>` : `<a class="btn primary" href="#/char/${attr(c.id)}/profile">${icon('chart')} See the profile →</a>`}</nav>
+      <nav class="pager">${prev ? `<a class="btn ghost" href="#/char/${attr(c.id)}/${prev.id}">← ${prev.num} ${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="btn primary" href="#/char/${attr(c.id)}/${next.id}">${next.num} ${esc(next.title)} →</a>` : `<a class="btn primary" href="#/char/${attr(c.id)}/profile">${icon('chart')} ${esc(t('See the profile →'))}</a>`}</nav>
     </main>
-    <aside class="rail acc-${section.accent}" id="rail" aria-label="Live visualization">${railHtml(c, section)}</aside>
+    <aside class="rail acc-${section.accent}" id="rail" aria-label="${attr(t('Live visualization'))}">${railHtml(c, section)}</aside>
   </div>`;
 }
 
@@ -319,15 +379,15 @@ function navHtml(c, sectionId) {
   const p = overallProgress(c, ctx.story);
   const circle = K.CIRCLES.find((x) => x.id === c.cast?.circle);
   return `<div class="char-head" style="--c:${esc(c.color)}">
-      <button class="avatar lg" data-action="pick-color" title="Change colour">${esc(initials(displayName(c)))}</button>
-      <div class="ch-text"><b>${esc(displayName(c))}</b><span>${esc(circle?.label || 'Unplaced')}</span></div>
+      <button class="avatar lg" data-action="pick-color" title="${attr(t('Change colour'))}">${esc(initials(displayName(c)))}</button>
+      <div class="ch-text"><b>${esc(displayName(c))}</b><span>${esc(circle?.label || t('Unplaced'))}</span></div>
       <div class="ch-ring">${V.progressRing(p.ratio, 44, 5, 'var(--c)')}</div>
     </div>
     <div class="nav-tools">
-      <a class="btn ghost sm" href="#/char/${attr(c.id)}/profile">${icon('chart')} Profile</a>
-      <button class="btn ghost sm" data-action="char-menu">${icon('menu')} More</button>
+      <a class="btn ghost sm" href="#/char/${attr(c.id)}/profile">${icon('chart')} ${esc(t('Profile'))}</a>
+      <button class="btn ghost sm" data-action="char-menu">${icon('menu')} ${esc(t('More'))}</button>
     </div>
-    <label class="nav-select"><span class="sr-only">Station</span><select data-action="nav-select">${SECTIONS.map((s) => `<option value="${s.id}" ${s.id === sectionId ? 'selected' : ''}>${s.num} ${esc(s.title)}</option>`).join('')}</select></label>
+    <label class="nav-select"><span class="sr-only">${esc(t('Station'))}</span><select data-action="nav-select">${SECTIONS.map((s) => `<option value="${s.id}" ${s.id === sectionId ? 'selected' : ''}>${s.num} ${esc(s.title)}</option>`).join('')}</select></label>
     <div class="nav-parts">${PARTS.map((pt) => `<div class="nav-part"><h4>${esc(pt.title)}</h4>${SECTIONS.filter((s) => s.part === pt.id).map((s) => {
     const b = p.bySection[s.id];
     return `<a class="nav-item acc-${s.accent} ${s.id === sectionId ? 'active' : ''} ${b.expected ? '' : 'optional'}" href="#/char/${attr(c.id)}/${s.id}" ${s.id === sectionId ? 'aria-current="page"' : ''}>
@@ -342,9 +402,9 @@ function railHtml(c, section) {
   const mine = checks.filter((x) => x.section === section.id);
   const elsewhere = checks.filter((x) => x.section !== section.id && x.level === 'warn').length;
   return `<div id="rail-visual">${fn ? fn(c, ctx) : ''}</div>
-    <div id="rail-checks" class="viz-card"><div class="viz-head"><h3>McKee checks</h3><span class="viz-sub">this station</span></div>
-      ${checksList(mine, { empty: 'Nothing flagged here yet.' })}
-      ${elsewhere ? `<a class="more-checks" href="#/char/${attr(c.id)}/profile">${elsewhere} warning${elsewhere === 1 ? '' : 's'} in other stations →</a>` : ''}</div>`;
+    <div id="rail-checks" class="viz-card"><div class="viz-head"><h3>${esc(t('McKee checks'))}</h3><span class="viz-sub">${esc(t('this station'))}</span></div>
+      ${checksList(mine, { empty: t('Nothing flagged here yet.') })}
+      ${elsewhere ? `<a class="more-checks" href="#/char/${attr(c.id)}/profile">${esc(tn(elsewhere, '{n} warning in other stations →', '{n} warnings in other stations →'))}</a>` : ''}</div>`;
 }
 
 function checksList(checks, { empty = '' } = {}) {
@@ -410,24 +470,24 @@ function profileView(c) {
   return `<main class="page profile" style="--c:${esc(c.color)}">
     <header class="pf-hero card">
       <div class="pf-id"><span class="avatar xl">${esc(initials(displayName(c)))}</span>
-        <div><p class="eyebrow">${esc(circle?.label || 'Unplaced')}${c.concept?.roleLabel ? ` · ${esc(c.concept.roleLabel)}` : ''}${ctx.story ? ` · ${esc(ctx.story.title)}` : ''}</p>
+        <div><p class="eyebrow">${esc(circle?.label || t('Unplaced'))}${c.concept?.roleLabel ? ` · ${esc(c.concept.roleLabel)}` : ''}${ctx.story ? ` · ${esc(ctx.story.title)}` : ''}</p>
         <h1>${esc(displayName(c))}</h1>${c.concept?.nickname ? `<p class="nick">“${esc(c.concept.nickname)}”</p>` : ''}
         ${c.concept?.logline ? `<p class="logline">${esc(c.concept.logline)}</p>` : ''}</div></div>
       <div class="pf-stats">
-        <div class="stat ring">${V.progressRing(p.ratio, 64, 7, 'var(--c)')}<span>built</span></div>
-        ${stat('dimensions', (c.dimensions || []).length, def ? `${esc(def.positive)} / ${esc(def.negative)}` : '')}
-        ${stat('traits on page', `${td.expressed}/${td.known}`, td.known ? `${Math.round(td.expressedRatio * 100)}% · ideal ≈30%` : '')}
-        ${stat('underdog', ap.capacity == null ? '—' : ap.underdog ? 'Yes' : 'No', ap.capacity == null ? '' : `${ap.power} vs ${ap.capacity}`)}
-        ${stat('choice depth', cd ?? '—', cd != null ? '/10' : '')}
+        <div class="stat ring">${V.progressRing(p.ratio, 64, 7, 'var(--c)')}<span>${esc(t('built'))}</span></div>
+        ${stat(t('dimensions'), (c.dimensions || []).length, def ? `${esc(def.positive)} / ${esc(def.negative)}` : '')}
+        ${stat(t('traits on page'), `${td.expressed}/${td.known}`, td.known ? esc(t('{pct}% · ideal ≈30%', { pct: Math.round(td.expressedRatio * 100) })) : '')}
+        ${stat(t('underdog'), ap.capacity == null ? '—' : esc(ap.underdog ? t('Yes') : t('No')), ap.capacity == null ? '' : esc(t('{power} vs {capacity}', { power: ap.power, capacity: ap.capacity })))}
+        ${stat(t('choice depth'), cd ?? '—', cd != null ? '/10' : '')}
       </div>
       <div class="pf-actions">
-        <a class="btn" href="#/char/${attr(c.id)}/spark">${icon('user')} Open builder</a>
+        <a class="btn" href="#/char/${attr(c.id)}/spark">${icon('user')} ${esc(t('Open builder'))}</a>
         <button class="btn ghost" data-action="export-md">${icon('file')} Markdown</button>
         <button class="btn ghost" data-action="export-json">${icon('download')} JSON</button>
-        <button class="btn ghost" data-action="print">${icon('print')} Print</button>
+        <button class="btn ghost" data-action="print">${icon('print')} ${esc(t('Print'))}</button>
       </div>
     </header>
-    <section class="card pf-stations"><div class="card-head"><h2>Sixteen stations</h2><span class="muted">click a bar to open it</span></div>${V.stationBars(c, ctx.story)}</section>
+    <section class="card pf-stations"><div class="card-head"><h2>${esc(t('Sixteen stations'))}</h2><span class="muted">${esc(t('click a bar to open it'))}</span></div>${V.stationBars(c, ctx.story)}</section>
     <div class="pf-grid">
       ${V.dimensionWheel(c, { interactive: false })}
       ${V.fourSelves(c, { compact: true })}
@@ -440,7 +500,7 @@ function profileView(c) {
       ${V.symbolicSpectrum(c)}
       ${V.performanceStar(c)}
       ${V.relationshipWeb(c, ctx)}
-      <div class="viz-card pf-checks"><div class="viz-head"><h3>McKee checks</h3><span class="viz-sub">${checks.filter((x) => x.level === 'warn').length} warnings · ${checks.filter((x) => x.level === 'tip').length} tips</span></div>${checksList(checks, { empty: 'No issues found.' })}</div>
+      <div class="viz-card pf-checks"><div class="viz-head"><h3>${esc(t('McKee checks'))}</h3><span class="viz-sub">${esc(tn(checks.filter((x) => x.level === 'warn').length, '{n} warning', '{n} warnings'))} · ${esc(tn(checks.filter((x) => x.level === 'tip').length, '{n} tip', '{n} tips'))}</span></div>${checksList(checks, { empty: t('No issues found.') })}</div>
     </div>
   </main>`;
 }
@@ -585,6 +645,24 @@ app.addEventListener('click', async (e) => {
   }
 });
 
+// Close the language menu on outside click or Escape.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.lang-menu')) setLangMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  const pop = document.getElementById('lang-pop');
+  if (!pop || pop.hidden) return;
+  if (e.key === 'Escape') {
+    setLangMenu(false);
+    document.querySelector('.lang-btn')?.focus();
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const opts = [...pop.querySelectorAll('.lang-opt')];
+    const i = opts.indexOf(document.activeElement);
+    opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]?.focus();
+  }
+});
+
 app.addEventListener('keydown', (e) => {
   const g = e.target.closest('g[data-action]');
   if (g && (e.key === 'Enter' || e.key === ' ')) {
@@ -606,8 +684,8 @@ const ACTIONS = {
     if (!ctx.character) return;
     const s = SECTION_BY_ID[ctx.section];
     const prompts = {
-      brainstorm: `Let's work on station ${s.num} “${s.title}”. Look at what I have, ask me what you need, and propose concrete options for the empty or weak fields.`,
-      critique: `Critique station ${s.num} “${s.title}” for this character with McKee’s principles. What's clichéd, missing or contradictory? Keep it to the three most important points, then propose fixes.`,
+      brainstorm: t('Let’s work on station {num} “{title}”. Look at what I have, ask me what you need, and propose concrete options for the empty or weak fields.', { num: s.num, title: s.title }),
+      critique: t('Critique station {num} “{title}” for this character with McKee’s principles. What’s clichéd, missing or contradictory? Keep it to the three most important points, then propose fixes.', { num: s.num, title: s.title }),
     };
     assistant.ask(prompts[el.dataset.prompt] || el.dataset.prompt);
   },
@@ -643,7 +721,7 @@ const ACTIONS = {
       for (const r of ent.obj.relationships || []) if (r.dimensionId === removed.id) r.dimensionId = '';
     }
     changed(ent, { rerender: true });
-    toast('Removed', 'info', 1500);
+    toast(t('Removed'), 'info', 1500);
   },
   'move-item': (el, ent) => {
     const list = listOf(ent.obj, el.dataset.list);
@@ -678,14 +756,14 @@ const ACTIONS = {
   },
   'open-char': (el) => go(`#/char/${el.dataset.id}/${state.route.view === 'builder' ? state.route.section : 'spark'}`),
   'new-story': async () => {
-    const title = await promptDialog('New story', 'Working title', '');
+    const title = await promptDialog(t('New story'), t('Working title'), '');
     if (title == null) return;
-    const s = await api('POST', '/api/stories', { title: title.trim() || 'Untitled story' });
+    const s = await api('POST', '/api/stories', { title: title.trim() || t('Untitled story') });
     state.stories.push(s);
     go(`#/story/${s.id}`);
   },
   'new-char': async (el) => {
-    const name = await promptDialog('New character', 'Name (you can change it later)', '');
+    const name = await promptDialog(t('New character'), t('Name (you can change it later)'), '');
     if (name == null) return;
     const storyId = el.dataset.story || null;
     const cast = castOf(storyId);
@@ -696,7 +774,7 @@ const ACTIONS = {
   'delete-story': async (el) => {
     const s = storyById(el.dataset.id);
     const n = castOf(s.id).length;
-    if (!(await confirmDialog('Delete story?', `“${s.title}” and its ${n} character${n === 1 ? '' : 's'} will be permanently deleted.`))) return;
+    if (!(await confirmDialog(t('Delete story?'), tn(n, '“{title}” and its {n} character will be permanently deleted.', '“{title}” and its {n} characters will be permanently deleted.', { title: s.title })))) return;
     await api('DELETE', `/api/stories/${s.id}`);
     state.stories = state.stories.filter((x) => x.id !== s.id);
     state.characters = state.characters.filter((x) => x.storyId !== s.id);
@@ -707,12 +785,12 @@ const ACTIONS = {
     const choice = await modal({
       title: displayName(c),
       body: `<div class="menu-list">
-        <button class="btn ghost block" data-btn="0">${icon('file')} Export Markdown bible</button>
-        <button class="btn ghost block" data-btn="1">${icon('download')} Export JSON</button>
-        <button class="btn ghost block" data-btn="2">${icon('copy')} Duplicate</button>
-        <button class="btn ghost block" data-btn="3">${icon('map')} Move to another story</button>
-        <button class="btn ghost block" data-btn="4">${icon('sparkle')} Change colour</button>
-        <button class="btn danger block" data-btn="5">${icon('trash')} Delete character</button></div>`,
+        <button class="btn ghost block" data-btn="0">${icon('file')} ${esc(t('Export Markdown bible'))}</button>
+        <button class="btn ghost block" data-btn="1">${icon('download')} ${esc(t('Export JSON'))}</button>
+        <button class="btn ghost block" data-btn="2">${icon('copy')} ${esc(t('Duplicate'))}</button>
+        <button class="btn ghost block" data-btn="3">${icon('map')} ${esc(t('Move to another story'))}</button>
+        <button class="btn ghost block" data-btn="4">${icon('sparkle')} ${esc(t('Change colour'))}</button>
+        <button class="btn danger block" data-btn="5">${icon('trash')} ${esc(t('Delete character'))}</button></div>`,
       buttons: [{ label: 'md', value: 'md' }, { label: 'json', value: 'json' }, { label: 'dup', value: 'dup' }, { label: 'move', value: 'move' }, { label: 'color', value: 'color' }, { label: 'del', value: 'del' }],
       onMount: (w) => w.querySelector('footer').remove(),
     });
@@ -723,14 +801,14 @@ const ACTIONS = {
       await flushSaves();
       const copy = await api('POST', `/api/characters/${c.id}/duplicate`);
       state.characters.push(copy);
-      toast('Duplicated', 'success');
+      toast(t('Duplicated'), 'success');
       return go(`#/char/${copy.id}/spark`);
     }
     if (choice === 'move') {
       const target = await modal({
-        title: 'Move to story',
-        body: `<label class="field"><span class="lbl">Story</span><select class="inp" id="move-target"><option value="">(no story)</option>${state.stories.map((s) => `<option value="${attr(s.id)}" ${s.id === c.storyId ? 'selected' : ''}>${esc(s.title)}</option>`).join('')}</select></label><p class="help">Relationships to characters in the old story are removed.</p>`,
-        buttons: [{ label: 'Cancel', value: undefined }, { label: 'Move', value: (w) => w.querySelector('#move-target').value, kind: 'primary' }],
+        title: t('Move to story'),
+        body: `<label class="field"><span class="lbl">${esc(t('Story'))}</span><select class="inp" id="move-target"><option value="">${esc(t('(no story)'))}</option>${state.stories.map((s) => `<option value="${attr(s.id)}" ${s.id === c.storyId ? 'selected' : ''}>${esc(s.title)}</option>`).join('')}</select></label><p class="help">${esc(t('Relationships to characters in the old story are removed.'))}</p>`,
+        buttons: [{ label: t('Cancel'), value: undefined }, { label: t('Move'), value: (w) => w.querySelector('#move-target').value, kind: 'primary' }],
       });
       if (target === undefined) return;
       c.storyId = target || null;
@@ -740,7 +818,7 @@ const ACTIONS = {
       return render();
     }
     if (choice === 'del') {
-      if (!(await confirmDialog('Delete character?', `${displayName(c)} will be permanently deleted.`))) return;
+      if (!(await confirmDialog(t('Delete character?'), t('{name} will be permanently deleted.', { name: displayName(c) })))) return;
       await api('DELETE', `/api/characters/${c.id}`);
       state.characters = state.characters.filter((x) => x.id !== c.id);
       for (const o of state.characters) o.relationships = (o.relationships || []).filter((r) => r.targetId !== c.id);
@@ -751,7 +829,7 @@ const ACTIONS = {
     const c = charById(state.route.id);
     const colors = ['#e4572e', '#4c6ef5', '#12b886', '#f59f00', '#ae3ec9', '#1098ad', '#d6336c', '#5c940d', '#e8590c', '#3b5bdb', '#495057', '#c2255c'];
     const pick = await modal({
-      title: 'Character colour',
+      title: t('Character colour'),
       body: `<div class="swatches">${colors.map((col, i) => `<button class="swatch ${col === c.color ? 'on' : ''}" style="background:${col}" data-btn="${i}" aria-label="${col}"></button>`).join('')}</div>`,
       buttons: colors.map((col) => ({ label: col, value: col })),
       onMount: (w) => w.querySelector('footer').remove(),
@@ -782,10 +860,10 @@ const ACTIONS = {
         const data = JSON.parse(await file.text());
         const res = await api('POST', '/api/import', { data, mode: 'merge' });
         await load();
-        toast(`Imported ${res.stories} stories, ${res.characters} characters`, 'success');
+        toast(t('Imported {stories} stories, {characters} characters', { stories: res.stories, characters: res.characters }), 'success');
         render();
       } catch (err) {
-        toast(`Import failed: ${err.message}`, 'error');
+        toast(t('Import failed: {error}', { error: err.message }), 'error');
       }
     };
     input.click();
@@ -793,8 +871,30 @@ const ACTIONS = {
   'restore-sample': async () => {
     await api('POST', '/api/reset-sample');
     await load();
-    toast('Sample story “Undertow” restored', 'success');
+    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success');
     render();
+  },
+  'translate-sample': async () => {
+    const lang = LOCALES.find((l) => l.id === getLocale())?.label || getLocale();
+    if (!(await confirmDialog(t('Replace the sample story?'), t('The sample story and its characters will be replaced by the {language} version. Changes you made to them will be lost.', { language: lang }), t('Replace')))) return;
+    await flushSaves();
+    await api('POST', '/api/reset-sample');
+    await load();
+    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success');
+    render();
+  },
+  'toggle-lang': (el) => setLangMenu(el.getAttribute('aria-expanded') !== 'true'),
+  'set-lang': async (el) => {
+    setLangMenu(false);
+    const id = el.dataset.lang;
+    if (id === getLocale()) return;
+    try { localStorage.setItem(LANG_KEY, id); } catch { /* storage unavailable */ }
+    await applyLocale(id);
+    render();
+    assistant.render();
+    document.querySelector('.lang-btn')?.focus();
+    // Server-made texts (book status…) come back in the new language.
+    api('GET', '/api/settings').then((ai) => { state.ai = ai; if (assistant.open) assistant.render(); }).catch(() => {});
   },
 };
 
@@ -884,9 +984,16 @@ async function load() {
     else if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
   } catch { /* storage unavailable */ }
   try {
+    await applyLocale(preferredLocale());
+  } catch (err) {
+    console.warn('language load failed', err);
+    localizeData(DEFAULT_LOCALE);
+    setLocale(DEFAULT_LOCALE);
+  }
+  try {
     await load();
   } catch (err) {
-    app.innerHTML = `<main class="page narrow"><div class="card empty-state"><h1>Can’t reach the CharBuild server</h1><p>${esc(err.message)}</p><p>Start it with <code>npm start</code> and reload.</p></div></main>`;
+    app.innerHTML = `<main class="page narrow"><div class="card empty-state"><h1>${esc(t('Can’t reach the CharBuild server'))}</h1><p>${esc(err.message)}</p><p>${tHtml('Start it with {cmd} and reload.', { cmd: '<code>npm start</code>' })}</p></div></main>`;
     return;
   }
   window.addEventListener('hashchange', route);

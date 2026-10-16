@@ -5,6 +5,7 @@
 import * as K from '/shared/catalog.js';
 import { displayName } from '/shared/model.js';
 import { esc, initials } from './ui.js';
+import { t } from '/shared/i18n.js';
 
 const SIZE = 640;
 const C = SIZE / 2;
@@ -51,10 +52,10 @@ export function renderCastMap(story, cast) {
   });
   body += `<circle cx="${C}" cy="${C}" r="${BOUNDS[0]}" class="cm-core"/>`;
   // Ring tags sit on the lower-left diagonal, where auto-placement rarely lands.
-  ['1st', '2nd', '3rd'].forEach((t, i) => {
+  [t('1st'), t('2nd'), t('3rd')].forEach((tag, i) => {
     const a = (3 * Math.PI) / 4;
     const r = RINGS[i + 1];
-    body += `<text x="${(C + r * Math.cos(a)).toFixed(1)}" y="${(C + r * Math.sin(a) + 4).toFixed(1)}" text-anchor="middle" class="cm-ring-tag">${t}</text>`;
+    body += `<text x="${(C + r * Math.cos(a)).toFixed(1)}" y="${(C + r * Math.sin(a) + 4).toFixed(1)}" text-anchor="middle" class="cm-ring-tag">${tag}</text>`;
   });
 
   // relationship edges
@@ -75,8 +76,8 @@ export function renderCastMap(story, cast) {
       const bend = both ? -0.18 : 0.18;
       const qx = mx - dy * bend;
       const qy = my + dx * bend;
-      const kind = K.RELATIONSHIP_KINDS.find((k) => k.id === r.kind)?.label || 'link';
-      body += `<path d="M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}" class="cm-edge eff-${esc(r.effect || '')}" marker-end="url(#cm-arrow)"><title>${esc(displayName(c))} → ${esc(cast.find((x) => x.id === r.targetId) ? displayName(cast.find((x) => x.id === r.targetId)) : '')}: ${esc(kind)}${r.draws ? ` — draws out ${esc(r.draws)}` : ''}</title></path>`;
+      const kind = K.RELATIONSHIP_KINDS.find((k) => k.id === r.kind)?.label || t('link');
+      body += `<path d="M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}" class="cm-edge eff-${esc(r.effect || '')}" marker-end="url(#cm-arrow)"><title>${esc(displayName(c))} → ${esc(cast.find((x) => x.id === r.targetId) ? displayName(cast.find((x) => x.id === r.targetId)) : '')}: ${esc(kind)}${r.draws ? ` — ${esc(t('draws out {what}', { what: r.draws }))}` : ''}</title></path>`;
     }
   }
   body = body.replace('</defs>', '<marker id="cm-arrow" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" class="cm-arrow"/></marker></defs>');
@@ -97,11 +98,11 @@ export function renderCastMap(story, cast) {
       ${c.concept?.roleLabel ? `<text y="${r + 30}" text-anchor="middle" class="cm-role">${esc(c.concept.roleLabel)}</text>` : ''}
     </g>`;
   }
-  if (cast.some((c) => pos[c.id].ring == null)) body += `<text x="12" y="${SIZE - 50}" class="cm-ring-lbl" text-anchor="start">Unplaced — drag into an orbit</text>`;
-  if (!cast.length) body += `<text x="${C}" y="${C + 4}" text-anchor="middle" class="cm-ring-lbl">Add characters to populate the cast</text>`;
-  return `<svg class="castmap" viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="Cast map of ${esc(story.title)}">${body}</svg>
-    <p class="cm-legend"><span><b>Centre</b> protagonist</span><span><b>1st</b> major support & service</span><span><b>2nd</b> one dimension or a vivid trait</span><span><b>3rd</b> bit parts & crowds</span></p>
-    <p class="cm-legend"><span><i class="lgd helps"></i>helps</span><span><i class="lgd hinders"></i>hinders</span><span><i class="lgd bothk"></i>both</span><span><i class="lgd dimk"></i>dots = dimensions</span></p>`;
+  if (cast.some((c) => pos[c.id].ring == null)) body += `<text x="12" y="${SIZE - 50}" class="cm-ring-lbl" text-anchor="start">${esc(t('Unplaced — drag into an orbit'))}</text>`;
+  if (!cast.length) body += `<text x="${C}" y="${C + 4}" text-anchor="middle" class="cm-ring-lbl">${esc(t('Add characters to populate the cast'))}</text>`;
+  return `<svg class="castmap" viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="${esc(t('Cast map of {title}', { title: story.title }))}">${body}</svg>
+    <p class="cm-legend"><span><b>${esc(t('Centre'))}</b> ${esc(t('protagonist'))}</span><span><b>${esc(t('1st'))}</b> ${esc(t('major support & service'))}</span><span><b>${esc(t('2nd'))}</b> ${esc(t('one dimension or a vivid trait'))}</span><span><b>${esc(t('3rd'))}</b> ${esc(t('bit parts & crowds'))}</span></p>
+    <p class="cm-legend"><span><i class="lgd helps"></i>${esc(t('helps'))}</span><span><i class="lgd hinders"></i>${esc(t('hinders'))}</span><span><i class="lgd bothk"></i>${esc(t('both'))}</span><span><i class="lgd dimk"></i>${esc(t('dots = dimensions'))}</span></p>`;
 }
 
 export function bindCastMap(root, { onMove, onOpen }) {

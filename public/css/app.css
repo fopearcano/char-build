@@ -167,6 +167,32 @@ button { font: inherit; color: inherit; }
 .save-status[data-state='error'] { color: var(--neg); }
 .save-status[data-state='saving'], .save-status[data-state='pending'] { color: var(--ink-2); }
 .coach-btn .ic { color: var(--dimension); }
+
+/* Language switcher (top-right) */
+.lang-menu { position: relative; }
+.lang-btn { gap: 5px; padding-inline: 9px; }
+.lang-btn > span { font-weight: 700; font-size: 12px; letter-spacing: 0.04em; }
+.lang-btn .caret { width: 13px; height: 13px; opacity: 0.6; transition: transform 0.15s; }
+.lang-btn[aria-expanded='true'] .caret { transform: rotate(180deg); }
+.lang-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; min-width: 180px;
+  display: grid; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); animation: fade 0.12s;
+}
+.lang-pop[hidden] { display: none; }
+.lang-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px;
+  background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.lang-opt:hover, .lang-opt:focus-visible { background: var(--surface-3); outline: none; }
+.lang-opt.on { font-weight: 650; }
+.lang-opt .ic { width: 15px; height: 15px; margin-left: auto; color: var(--accent); }
+.lang-code {
+  display: inline-grid; place-items: center; min-width: 28px; padding: 2px 5px; border-radius: 5px;
+  background: var(--track); color: var(--ink-2); font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+}
+.lang-opt.on .lang-code { background: color-mix(in srgb, var(--accent) 18%, var(--track)); color: var(--ink); }
+.book-lang { margin: 6px 2px 0; }
 .coach-btn.on { border-color: color-mix(in srgb, var(--dimension) 45%, var(--line)); }
 
 /* ── Pages ────────────────────────────────────────────────────────────── */
@@ -826,15 +852,17 @@ path.pan.ant { fill: color-mix(in srgb, var(--antagonism) 75%, var(--surface)); 
 .pf-grid > .viz-card { break-inside: avoid; margin-bottom: 16px; display: block; }
 
 /* ── Assistant drawer ─────────────────────────────────────────────────── */
+/* Starts below the top bar, so the language menu and the Coach toggle stay
+   reachable while it is open (side by side from 1500px). */
 .coach-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 40; width: min(440px, 100vw);
+  position: fixed; top: 58px; right: 0; bottom: 0; z-index: 40; width: min(440px, 100vw);
   display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--line);
   box-shadow: var(--shadow-lg); transform: translateX(100%); transition: transform 0.2s ease; --a: var(--dimension);
 }
 .coach-drawer.in { transform: none; }
 @media (min-width: 1500px) {
   body.with-assistant { padding-right: 440px; }
-  body.with-assistant .coach-drawer { box-shadow: none; }
+  body.with-assistant .coach-drawer { box-shadow: none; top: 0; }
   body.with-assistant .builder { grid-template-columns: 230px minmax(0, 1fr) 340px; }
 }
 .as-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
@@ -973,6 +1001,7 @@ path.pan.ant { fill: color-mix(in srgb, var(--antagonism) 75%, var(--surface)); 
   .station-head { gap: 14px; }
   .topbar { padding: 0 12px; gap: 10px; }
   .brand-t small, .crumb span, .save-status, .top-actions .btn span { display: none; }
+  .top-actions .lang-btn > span { display: inline; }
   .crumb:last-child span { display: inline; }
   .page { padding: 18px 14px 60px; }
   .method { grid-template-columns: repeat(2, 1fr); }
@@ -984,6 +1013,14 @@ path.pan.ant { fill: color-mix(in srgb, var(--antagonism) 75%, var(--surface)); 
   .pf-id h1 { font-size: 34px; }
   .story-grid-lib { grid-template-columns: 1fr; }
   .pole { min-width: 0; font-size: 11px; }
+}
+
+@media (max-width: 480px) {
+  .brand-t { display: none; }
+  .topbar { gap: 6px; }
+  .top-actions { gap: 4px; }
+  .lang-btn { padding-inline: 7px; }
+  .lang-btn .caret { display: none; }
 }
 
 /* ── Print (profile one-pager) ────────────────────────────────────────── */

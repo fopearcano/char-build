@@ -12,8 +12,15 @@
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-  <div id="app"><p style="padding:40px;font-family:system-ui">Loading CharBuild…</p></div>
-  <noscript>CharBuild needs JavaScript.</noscript>
+  <div id="app"><p style="padding:40px;font-family:system-ui" id="boot-msg">Loading CharBuild…</p></div>
+  <script>
+    // Match the loading screen to the language the app will open in.
+    try {
+      var l = localStorage.getItem('charbuild-lang') || (navigator.languages || [navigator.language]).join(',');
+      if (/^it/i.test(l)) { document.documentElement.lang = 'it'; document.getElementById('boot-msg').textContent = 'Caricamento di CharBuild…'; }
+    } catch (e) { /* storage unavailable */ }
+  </script>
+  <noscript>CharBuild needs JavaScript. · CharBuild richiede JavaScript.</noscript>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>
