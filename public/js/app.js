@@ -12,6 +12,8 @@ import { renderFields, renderStoryFields } from './forms.js';
 import * as V from './viz.js';
 import { renderCastMap, bindCastMap } from './castmap.js';
 import { Assistant } from './assistant.js';
+import { createTransfer } from './transfer.js';
+import { exportFileName } from '/shared/transfer.js';
 
 const SAMPLE_ID = 'story_undertow';
 const LANG_KEY = 'charbuild-lang';
@@ -59,8 +61,13 @@ export async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(data?.error || `${res.status} ${res.statusText}`);
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!res.ok) throw Object.assign(new Error(data?.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
 
@@ -73,7 +80,13 @@ const ctxFor = (c) => {
 };
 
 // ── Saving ───────────────────────────────────────────────────────────────
+// Each edit schedules a save of that story or character. Saves of one item
+// run one after another, each based on the version the server last returned;
+// if another device or tab saved in between, the server refuses (409) and the
+// writer chooses which version to keep.
 const saveTimers = new Map();
+const inflight = new Map();
+const conflicted = new Set();
 function scheduleSave(kind, id) {
   const key = `${kind}:${id}`;
   clearTimeout(saveTimers.get(key));
@@ -81,40 +94,100 @@ function scheduleSave(kind, id) {
   saveTimers.set(key, setTimeout(() => saveNow(kind, id), 650));
 }
 
-async function saveNow(kind, id) {
-  saveTimers.delete(`${kind}:${id}`);
-  const entity = kind === 'story' ? storyById(id) : charById(id);
-  if (!entity) return;
-  state.saving += 1;
-  setSaveStatus('saving');
+function saveNow(kind, id) {
+  const key = `${kind}:${id}`;
+  clearTimeout(saveTimers.get(key));
+  saveTimers.delete(key);
+  const prev = inflight.get(key);
+  const run = (async () => {
+    if (prev) await prev.catch(() => {});
+    const entity = kind === 'story' ? storyById(id) : charById(id);
+    if (!entity) return;
+    state.saving += 1;
+    setSaveStatus('saving');
+    try {
+      const saved = await api('PUT', `/api/${kind === 'story' ? 'stories' : 'characters'}/${id}`, entity);
+      entity.updatedAt = saved.updatedAt;
+      state.saveError = false;
+      conflicted.delete(key);
+    } catch (err) {
+      if (err.status === 409 && err.data?.current) {
+        conflicted.add(key);
+        resolveConflict(kind, entity, err.data.current);
+      } else {
+        state.saveError = true;
+        toast(t('Could not save: {error}', { error: err.message }), 'error');
+        saveTimers.set(key, setTimeout(() => saveNow(kind, id), 4000));
+      }
+    } finally {
+      state.saving -= 1;
+      updateSaveStatus();
+    }
+  })();
+  inflight.set(key, run);
+  run.finally(() => {
+    if (inflight.get(key) === run) inflight.delete(key);
+  });
+  return run;
+}
+
+function updateSaveStatus() {
+  setSaveStatus(conflicted.size ? 'conflict' : state.saveError ? 'error' : saveTimers.size || state.saving ? 'saving' : 'saved');
+}
+
+// Another device or tab saved this item after we loaded it.
+const resolving = new Set();
+async function resolveConflict(kind, local, current) {
+  const key = `${kind}:${local.id}`;
+  if (resolving.has(key)) return;
+  resolving.add(key);
   try {
-    const saved = await api('PUT', `/api/${kind === 'story' ? 'stories' : 'characters'}/${id}`, entity);
-    entity.updatedAt = saved.updatedAt;
-    state.saveError = false;
-  } catch (err) {
-    state.saveError = true;
-    toast(t('Could not save: {error}', { error: err.message }), 'error');
-    saveTimers.set(`${kind}:${id}`, setTimeout(() => saveNow(kind, id), 4000));
+    await askConflict(kind, local, current);
   } finally {
-    state.saving -= 1;
-    setSaveStatus(state.saveError ? 'error' : saveTimers.size || state.saving ? 'saving' : 'saved');
+    resolving.delete(key);
   }
+}
+
+async function askConflict(kind, local, current) {
+  const name = kind === 'story' ? local.title : displayName(local);
+  const choice = await modal({
+    title: t('Changed somewhere else'),
+    body: `<p>${esc(t('“{name}” was saved from another device or tab while you were editing it here. Which version do you want to keep?', { name }))}</p>
+      <p class="help">${esc(t('Theirs was saved {when}.', { when: timeAgo(current.updatedAt) }))}</p>`,
+    buttons: [{ label: t('Use the other version'), value: 'theirs' }, { label: t('Keep mine'), value: 'mine', kind: 'primary' }],
+  });
+  const key = `${kind}:${local.id}`;
+  if (choice === 'mine') {
+    // Save on top of the newer version (theirs is in the backups).
+    const entity = kind === 'story' ? storyById(local.id) : charById(local.id);
+    if (entity) entity.updatedAt = current.updatedAt;
+    conflicted.delete(key);
+    saveNow(kind, local.id);
+  } else if (choice === 'theirs') {
+    const list = kind === 'story' ? state.stories : state.characters;
+    const i = list.findIndex((x) => x.id === local.id);
+    if (i >= 0) list[i] = current;
+    conflicted.delete(key);
+    updateSaveStatus();
+    render();
+  }
+  // Dismissed: nothing is saved until the next edit asks again.
 }
 
 async function flushSaves() {
   const keys = [...saveTimers.keys()];
   await Promise.all(keys.map((k) => {
-    clearTimeout(saveTimers.get(k));
     const [kind, id] = k.split(':');
     return saveNow(kind, id);
   }));
+  await Promise.all([...inflight.values()].map((p) => p.catch(() => {})));
 }
 
 function setSaveStatus(s) {
   const el = document.getElementById('save-status');
   if (!el) return;
   el.dataset.state = s;
-  el.textContent = { pending: t('Editing…'), saving: t('Saving…'), saved: t('All changes saved'), error: t('Save failed — retrying') }[s] || '';
+  el.textContent = { pending: t('Editing…'), saving: t('Saving…'), saved: t('All changes saved'), error: t('Save failed — retrying'), conflict: t('Not saved — changed elsewhere') }[s] || '';
 }
 
 window.addEventListener('beforeunload', (e) => {
@@ -238,7 +311,7 @@ function libraryView() {
       </a>
       <div class="sc-cast">${cast.map((c) => `<a class="avatar sm" style="--c:${esc(c.color)}" href="#/char/${attr(c.id)}/spark" title="${attr(displayName(c))}">${esc(initials(displayName(c)))}</a>`).join('')}
         <button class="avatar sm add" data-action="new-char" data-story="${attr(s.id)}" title="${attr(t('New character'))}" aria-label="${attr(t('New character'))}">${icon('plus')}</button></div>
-      <footer class="sc-foot"><span>${esc(tn(cast.length, '{n} character', '{n} characters'))}${prot ? ` · ${esc(t('lead: {name}', { name: displayName(prot) }))}` : ''}</span><span class="muted">${esc(timeAgo(s.updatedAt))}</span></footer>
+      <footer class="sc-foot"><span>${esc(tn(cast.length, '{n} character', '{n} characters'))}${prot ? ` · ${esc(t('lead: {name}', { name: displayName(prot) }))}` : ''}</span><span class="sc-end"><span class="muted">${esc(timeAgo(s.updatedAt))}</span><button class="icon-btn sm" data-action="export-dialog" data-story="${attr(s.id)}" title="${attr(t('Export this story'))}" aria-label="${attr(t('Export this story'))}">${icon('download')}</button></span></footer>
     </article>`;
   }).join('');
   const loose = castOf(null);
@@ -251,7 +324,8 @@ function libraryView() {
         <div class="hero-actions">
           <button class="btn primary" data-action="new-story">${icon('plus')} ${esc(t('New story'))}</button>
           <button class="btn" data-action="import">${icon('upload')} ${esc(t('Import'))}</button>
-          <a class="btn ghost" href="/api/export?download=1">${icon('download')} ${esc(t('Export all'))}</a>
+          <button class="btn ghost" data-action="export-dialog">${icon('download')} ${esc(t('Export…'))}</button>
+          <button class="btn ghost" data-action="backups">${icon('refresh')} ${esc(t('Backups'))}</button>
           ${sampleButton()}
         </div>
       </div>
@@ -307,6 +381,7 @@ function storyView(s) {
       <div class="gchips">${genres.map((g) => `<span class="gchip ${g.family}" title="${attr(g.coreValue)}">${esc(g.label)}</span>`).join('')}${s.coreValue?.positive ? `<span class="tag">${esc(s.coreValue.positive)} ↔ ${esc(s.coreValue.negative || '?')}</span>` : ''}</div></div>
       <div class="hero-actions">
         <button class="btn primary" data-action="new-char" data-story="${attr(s.id)}">${icon('plus')} ${esc(t('New character'))}</button>
+        <button class="btn ghost" data-action="export-dialog" data-story="${attr(s.id)}">${icon('download')} ${esc(t('Export'))}</button>
         <button class="btn ghost" data-action="delete-story" data-id="${attr(s.id)}">${icon('trash')} ${esc(t('Delete story'))}</button>
       </div>
     </section>
@@ -842,45 +917,26 @@ const ACTIONS = {
   'export-md': async () => {
     const c = charById(state.route.id);
     const ctx = ctxFor(c);
-    download(`${displayName(c).replace(/[^\w-]+/g, '_')}.md`, characterMarkdown(c, ctx.story, ctx.cast), 'text/markdown');
+    download(exportFileName({ kind: 'character', characters: [c] }, 'md'), characterMarkdown(c, ctx.story, ctx.cast), 'text/markdown');
   },
-  'export-json': async () => {
-    const c = charById(state.route.id);
-    download(`${displayName(c).replace(/[^\w-]+/g, '_')}.json`, JSON.stringify({ app: 'char-build', character: c }, null, 2));
-  },
+  'export-json': () => transfer.exportCharacter(state.route.id),
+  'export-dialog': (el) => transfer.openExport(el.dataset.story ? { stories: [el.dataset.story] } : {}),
+  backups: () => transfer.openBackups(),
   print: () => window.print(),
-  import: async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json,.json';
-    input.onchange = async () => {
-      const file = input.files[0];
-      if (!file) return;
-      try {
-        const data = JSON.parse(await file.text());
-        const res = await api('POST', '/api/import', { data, mode: 'merge' });
-        await load();
-        toast(t('Imported {stories} stories, {characters} characters', { stories: res.stories, characters: res.characters }), 'success');
-        render();
-      } catch (err) {
-        toast(t('Import failed: {error}', { error: err.message }), 'error');
-      }
-    };
-    input.click();
-  },
+  import: () => transfer.pickAndImport(),
   'restore-sample': async () => {
-    await api('POST', '/api/reset-sample');
+    const res = await api('POST', '/api/reset-sample');
     await load();
-    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success');
+    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success', 8000, undoAction(res));
     render();
   },
   'translate-sample': async () => {
     const lang = LOCALES.find((l) => l.id === getLocale())?.label || getLocale();
     if (!(await confirmDialog(t('Replace the sample story?'), t('The sample story and its characters will be replaced by the {language} version. Changes you made to them will be lost.', { language: lang }), t('Replace')))) return;
     await flushSaves();
-    await api('POST', '/api/reset-sample');
+    const res = await api('POST', '/api/reset-sample');
     await load();
-    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success');
+    toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success', 8000, undoAction(res));
     render();
   },
   'toggle-lang': (el) => setLangMenu(el.getAttribute('aria-expanded') !== 'true'),
@@ -969,12 +1025,17 @@ const assistant = new Assistant({
   openCharacter: (id) => go(`#/char/${id}/spark`),
 });
 
+// ── Import / export / backups ────────────────────────────────────────────
+const transfer = createTransfer({ api, getState: () => state, load, render, flushSaves });
+const undoAction = (res) => (res?.backup?.id ? { label: t('Undo'), onClick: () => transfer.undo(res.backup.id).catch((err) => toast(err.message, 'error')) } : null);
+
 // ── Boot ─────────────────────────────────────────────────────────────────
 async function load() {
   const data = await api('GET', '/api/bootstrap');
   state.stories = data.stories;
   state.characters = data.characters;
   state.ai = data.ai;
+  state.recovered = data.recovered || null;
 }
 
 (async function boot() {
@@ -998,6 +1059,16 @@ async function load() {
   }
   window.addEventListener('hashchange', route);
   route();
+  transfer.enableDrop();
+  // The library file couldn't be read when the server started.
+  const rec = state.recovered;
+  let seen = null;
+  try { seen = sessionStorage.getItem('charbuild-recovered'); } catch { /* storage unavailable */ }
+  if (rec && seen !== rec.file) {
+    const when = rec.createdAt ? new Date(rec.createdAt).toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }) : null;
+    toast(when ? t('The library file was damaged. CharBuild restored the backup from {date} (the damaged file was kept as {file}).', { date: when, file: rec.file }) : t('The library file was damaged and no backup was found; the damaged file was kept as {file}.', { file: rec.file }), 'warn', 20000, { label: t('Backups'), onClick: () => transfer.openBackups() });
+    try { sessionStorage.setItem('charbuild-recovered', rec.file); } catch { /* storage unavailable */ }
+  }
 })();
 
 export { state };

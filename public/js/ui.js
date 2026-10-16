@@ -72,7 +72,8 @@ export function debounce(fn, ms) {
   return d;
 }
 
-export function toast(message, kind = 'info', ms = 3200) {
+// `action` adds a button to the toast, e.g. { label: 'Undo', onClick }.
+export function toast(message, kind = 'info', ms = 3200, action = null) {
   let host = document.getElementById('toasts');
   if (!host) {
     host = document.createElement('div');
@@ -83,13 +84,25 @@ export function toast(message, kind = 'info', ms = 3200) {
   }
   const el = document.createElement('div');
   el.className = `toast toast-${kind}`;
-  el.innerHTML = `${icon(kind === 'error' ? 'alert' : kind === 'success' ? 'check' : 'info')}<span>${esc(message)}</span>`;
-  host.appendChild(el);
-  requestAnimationFrame(() => el.classList.add('in'));
-  setTimeout(() => {
+  el.innerHTML = `${icon(kind === 'error' ? 'alert' : kind === 'success' ? 'check' : kind === 'warn' ? 'alert' : 'info')}<span>${esc(message)}</span>`;
+  const dismiss = () => {
     el.classList.remove('in');
     setTimeout(() => el.remove(), 300);
-  }, ms);
+  };
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      dismiss();
+      action.onClick();
+    });
+    el.appendChild(btn);
+  }
+  host.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('in'));
+  setTimeout(dismiss, ms);
 }
 
 // Promise-based modal. `body` is HTML; buttons: [{label, value, kind}]

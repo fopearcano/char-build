@@ -15,6 +15,7 @@ import { characterMarkdown } from '../shared/export.js';
 import { displayName } from '../shared/model.js';
 import { tr, localizeError, DEFAULT_LOCALE } from '../shared/i18n.js';
 import { requestLang, hostLang, withLocale } from './i18n.js';
+import { exportFileName } from '../shared/transfer.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '..');
@@ -37,7 +38,8 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   const ai = createAI({ store, rootDir, makeClient });
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '5mb' }));
+  // Imports with coach conversations can be large.
+  app.use(express.json({ limit: '25mb' }));
 
   // Basic hardening: same-origin JSON API, no framing. Every request also
   // gets the writer's interface language for messages it returns.
@@ -63,7 +65,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   const aiStatus = (req) => ({ ...ai.status(req.lang), canEditSettings: canEditSettings(req) });
 
   app.get('/api/bootstrap', (req, res) => {
-    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req) });
+    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req), recovered: store.recovered });
   });
 
   // Stories
@@ -80,7 +82,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   app.put('/api/characters/:id', wrap(async (req, res) => res.json(await store.updateCharacter(idParam(req), req.body))));
   app.patch('/api/characters/:id', wrap(async (req, res) => res.json(await store.patchCharacter(idParam(req), req.body?.updates))));
   app.delete('/api/characters/:id', wrap(async (req, res) => res.json(await store.deleteCharacter(idParam(req)))));
-  app.post('/api/characters/:id/duplicate', wrap(async (req, res) => res.status(201).json(await store.duplicateCharacter(idParam(req)))));
+  app.post('/api/characters/:id/duplicate', wrap(async (req, res) => res.status(201).json(await store.duplicateCharacter(idParam(req), req.lang))));
   app.get('/api/characters/:id/markdown', (req, res) => {
     const c = store.getCharacter(idParam(req));
     const story = c.storyId ? store.data.stories.find((s) => s.id === c.storyId) : null;
@@ -91,16 +93,40 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
     res.send(md);
   });
 
-  // Import / export
-  app.get('/api/export', (req, res) => {
-    if (req.query.download) res.setHeader('Content-Disposition', 'attachment; filename="charbuild-export.json"');
-    res.json(store.exportAll());
-  });
-  app.post('/api/import', wrap(async (req, res) => res.json(await store.importData(req.body?.data, req.body?.mode))));
+  // Export: everything, or ?stories=a,b (each with its cast) and/or
+  // ?characters=c,d; &chats=1 adds coach conversations.
+  const idList = (v) => String(v || '').split(',').map((x) => x.trim()).filter(validId);
+  app.get('/api/export', wrap(async (req, res) => {
+    const data = await store.exportSelection({ storyIds: idList(req.query.stories), characterIds: idList(req.query.characters), includeChats: req.query.chats === '1' });
+    if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="${exportFileName(data)}"`);
+    res.json(data);
+  }));
+
+  // Import: preview first (nothing changes), then apply with choices.
+  app.post('/api/import/preview', wrap(async (req, res) => res.json(store.previewImport(req.body?.data))));
+  app.post('/api/import', wrap(async (req, res) => {
+    const b = req.body || {};
+    const ids = (v) => (Array.isArray(v) ? v.filter(validId) : null);
+    const target = b.target == null ? 'keep' : String(b.target);
+    if (!['keep', 'none'].includes(target) && !validId(target)) throw new HttpError(400, 'Invalid id');
+    res.json(await store.applyImport(b.data, {
+      conflict: b.conflict || 'update',
+      select: b.select ? { stories: ids(b.select.stories), characters: ids(b.select.characters) } : null,
+      target,
+      includeChats: b.includeChats !== false,
+      replace: b.replace === true || b.mode === 'replace',
+      lang: req.lang,
+    }));
+  }));
   app.post('/api/reset-sample', wrap(async (req, res) => {
     const sample = sampleData(req.lang);
-    res.json(await store.importData(sample, 'merge'));
+    res.json(await store.importData(sample, 'merge', req.lang));
   }));
+
+  // Backups (taken automatically; any of them can be restored)
+  app.get('/api/backups', wrap(async (req, res) => res.json(await store.listBackups())));
+  app.post('/api/backups', wrap(async (req, res) => res.status(201).json(await store.createBackup('manual'))));
+  app.post('/api/backups/:id/restore', wrap(async (req, res) => res.json(await store.restoreBackup(idParam(req)))));
 
   // Settings (API key is write-only; only a hint is ever returned)
   app.get('/api/settings', (req, res) => res.json(aiStatus(req)));
@@ -194,8 +220,10 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   // Errors
   app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     const status = err.status || err.statusCode || 500;
-    if (status >= 500) console.error('[server]', err);
-    res.status(status).json({ error: status >= 500 ? tr(req.lang, 'Internal error') : localizeError(err, req.lang) });
+    const hidden = status >= 500 && !err.expose;
+    if (hidden) console.error('[server]', err);
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: tr(req.lang, 'The file is too large to import.') });
+    res.status(status).json({ error: hidden ? tr(req.lang, 'Internal error') : localizeError(err, req.lang), ...(err.payload || {}) });
   });
 
   return { app, store, ai };

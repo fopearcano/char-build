@@ -75,7 +75,10 @@ test('export / import round-trip', async (t) => {
   const s2 = await start({ seed: false });
   t.after(s2.close);
   const res = await s2.req('POST', '/api/import', { data: dump, mode: 'merge' });
-  assert.deepEqual(res.json, { stories: 1, characters: 6 });
+  assert.equal(res.json.stories, 1);
+  assert.equal(res.json.characters, 6);
+  assert.deepEqual(res.json.added, { stories: 1, characters: 6, chats: 0 });
+  assert.ok(res.json.backup.id, 'a backup is taken before importing');
   assert.equal((await s2.req('GET', '/api/characters/char_mara')).json.name, 'Mara Voss');
 });
 

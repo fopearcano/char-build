@@ -1,9 +1,11 @@
-// Markdown "character bible" export, organised by the builder's stations.
+// Markdown exports: the "character bible", organised by the builder's
+// stations, and the story bible (story settings, cast, then every
+// character's bible).
 
 import * as K from './catalog.js';
-import { SECTIONS } from './sections.js';
+import { SECTIONS, STORY_FIELDS } from './sections.js';
 import { getPath, isFilled, displayName } from './model.js';
-import { overallProgress, traitDensity, antagonismProfile, choiceDepth, characterChecks } from './analysis.js';
+import { overallProgress, traitDensity, antagonismProfile, choiceDepth, characterChecks, castChecks } from './analysis.js';
 import { t } from './i18n.js';
 
 const label = (options, id) => options?.find((o) => o.id === id)?.label || id;
@@ -38,7 +40,12 @@ function fieldLines(c, section) {
   return lines;
 }
 
-export function characterMarkdown(c, story, cast = []) {
+const footer = () => ['---', `*${t('Built with CharBuild · framework after Robert McKee, {title} ({year}).', { title: K.BOOK.title, year: K.BOOK.year })}*`];
+
+// Push every heading down `by` levels (# → ##) to nest a bible in a larger one.
+const nest = (md, by) => md.replace(/^(#{1,5}) /gm, (m, h) => `${h}${'#'.repeat(by)} `);
+
+export function characterMarkdown(c, story, cast = [], { withFooter = true } = {}) {
   const out = [];
   const p = overallProgress(c, story);
   out.push(`# ${displayName(c)}`);
@@ -92,6 +99,47 @@ export function characterMarkdown(c, story, cast = []) {
   if (checks.length) {
     out.push(`## ${t('Open McKee checks')}`, '', ...checks.map((x) => `- **${x.title}** — ${x.detail} (${x.ref})`), '');
   }
-  out.push('---', `*${t('Built with CharBuild · framework after Robert McKee, {title} ({year}).', { title: K.BOOK.title, year: K.BOOK.year })}*`);
+  if (withFooter) out.push(...footer());
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function storyFieldValue(f, story) {
+  const v = getPath(story, f.path);
+  if (f.component === 'genrePicker') {
+    return (v || []).map((id) => K.PRIMARY_GENRES.find((g) => g.id === id)).filter(Boolean).map((g) => `${g.label} (${g.coreValue})`).join(', ');
+  }
+  if (!isFilled(v)) return '';
+  if (Array.isArray(v)) return v.map((id) => label(f.options, id)).join(', ');
+  if (f.options) return label(f.options, v);
+  return String(v).replace(/\n+/g, ' ');
+}
+
+// The whole story: its settings, the cast by orbit, cast-level checks, then
+// one chapter per character (protagonist first).
+export function storyMarkdown(story, cast = []) {
+  const order = { protagonist: 0, first: 1, second: 2, third: 3 };
+  const sorted = [...cast].sort((a, b) => (order[a.cast?.circle] ?? 4) - (order[b.cast?.circle] ?? 4));
+  const out = [`# ${story.title}`];
+  if (story.logline) out.push('', `> ${story.logline}`);
+  out.push('', `*${[story.format, t('{n} characters', { n: cast.length })].filter(Boolean).join(' · ')}*`, '');
+
+  const settings = STORY_FIELDS.filter((f) => f.path !== 'title' && f.path !== 'logline')
+    .map((f) => [f.label, storyFieldValue(f, story)])
+    .filter(([, v]) => v);
+  if (settings.length) out.push(`## ${t('Story settings')}`, '', ...settings.map(([k, v]) => `- **${k}** — ${v}`), '');
+
+  if (sorted.length) {
+    out.push(`## ${t('Cast')}`, '');
+    for (const circle of [...K.CIRCLES, { id: '', label: t('Unplaced') }]) {
+      const members = sorted.filter((c) => (c.cast?.circle || '') === circle.id);
+      if (members.length) out.push(`- **${circle.label}** — ${members.map((c) => `${displayName(c)}${c.concept?.roleLabel ? ` (${c.concept.roleLabel})` : ''}`).join(', ')}`);
+    }
+    out.push('');
+  }
+  const checks = castChecks(story, cast).filter((x) => x.level !== 'good');
+  if (checks.length) out.push(`## ${t('Cast design checks')}`, '', ...checks.map((x) => `- **${x.title}** — ${x.detail} (${x.ref})`), '');
+
+  for (const c of sorted) out.push(nest(characterMarkdown(c, story, cast, { withFooter: false }), 1), '');
+  out.push(...footer());
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }

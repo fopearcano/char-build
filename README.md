@@ -212,12 +212,59 @@ ranking (BM25). No book text is copied into the source code: the station
 guidance is paraphrased, with chapter references. You can point
 `BOOK_PATH` at a different copy.
 
-## Data
+## Saving, export and import
 
-* Stories and characters are saved to `data/db.json`, with atomic writes.
-* From the library you can export everything (*Export all*) or import a JSON
-  file. Each character can also be exported from its profile as Markdown or
-  JSON.
+Everything is stored on the computer running the server, in `data/` (or `DATA_DIR`).
+
+**Saving.**
+* Every edit is saved automatically a moment after you stop typing, into
+  `data/db.json`. Writes are atomic: the file is written to a temporary name,
+  then renamed.
+* If the disk write fails, the app says so ("Could not save…") and retries.
+  It never shows "All changes saved" for a save that didn't happen.
+* If the same story or character is edited on two devices or in two tabs, the
+  later save is refused, and you choose which version to keep.
+* Coach conversations are kept in `data/chats/`, and AI settings in
+  `data/settings.json`.
+
+**Backups** live in `data/backups/`.
+* A snapshot of the library is taken before every import, restore or
+  library replacement, and every half hour while you work.
+* The 20 newest are kept, plus the newest of each of the last 14 days.
+* **Backups** in the library lists them. Restoring one first snapshots the
+  current library, so a restore can be undone too.
+* If `db.json` is ever unreadable at startup, it is set aside
+  (`db.json.corrupt-…`) and the newest backup is loaded.
+
+**Export** (*Export…* in the library, *Export* on a story, or the character menu).
+* Pick whole stories (each comes with its cast), single characters inside a
+  story, or characters without a story.
+* **JSON** is the re-importable format, and can include the coach
+  conversations. **Markdown** gives readable story and character bibles.
+* Files are named after what they hold, e.g. `charbuild-undertow-2026-10-16.json`.
+
+**Import** (*Import* in the library, or drop a `.json` file anywhere on the page).
+* A preview lists every story and character in the file, each marked as
+  *new*, *unchanged* or *already in your library* (and whether your copy or
+  the file's is newer). Tick what you want.
+* For items you already have, choose one of:
+  * **Update them:** the file wins.
+  * **Keep both:** the file's version comes in as a copy, with fresh ids, and
+    relationships are re-pointed to the copies.
+  * **Keep yours:** skip them.
+* Characters whose story isn't in the file can go to their original story, to
+  a story you pick, or to no story. Links to castmates who aren't there are
+  removed.
+* "Replace the whole library" is available behind a confirmation.
+* Every import shows **Undo** (it restores the backup taken just before it).
+  Files from older versions, including single-character exports, still import.
+
+| Endpoint | |
+|----------|-|
+| `GET /api/export?stories=a,b&characters=c&chats=1` | Export a selection (no parameters: the whole library) |
+| `POST /api/import/preview` `{data}` | What importing would do, item by item; changes nothing |
+| `POST /api/import` `{data, select, conflict, target, includeChats, replace}` | Import. `conflict`: `update` / `copy` / `skip`; `target`: `keep` / `none` / a story id |
+| `GET /api/backups`, `POST /api/backups`, `POST /api/backups/:id/restore` | List, take, restore backups |
 
 ## Configuration
 
@@ -242,9 +289,9 @@ shared/   Used by both browser and server: McKee catalog, the 16 stations, data 
           field index and validation, analysis and checks, Markdown export,
           i18n (i18n.js, i18n-data.js) and the Italian dictionaries (locales/)
 public/   Single-page app (plain ES modules, no build step): app.js, forms.js, viz.js,
-          castmap.js, assistant.js, css/app.css
-test/     node:test suites: the agent loops against scripted fake clients, and the real OpenAI SDK
-          against a local mock server
+          castmap.js, assistant.js, transfer.js (export/import/backups), css/app.css
+test/     node:test suites: the agent loops against scripted fake clients, the real OpenAI SDK
+          against a local mock server, import/export/backups, translations
 ```
 
 ```bash
