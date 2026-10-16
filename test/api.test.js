@@ -19,6 +19,8 @@ async function start(opts = {}) {
     try { json = JSON.parse(text); } catch { /* not json */ }
     return { status: res.status, json, text, headers: res.headers };
   };
+  // With a fake model client, configure a (fake) Claude key so the coach is enabled.
+  if (opts.makeClient) await req('PUT', '/api/settings', { apiKey: 'sk-ant-test-key-0000' });
   return { base, req, store, dataDir, close: () => new Promise((r) => server.close(r)) };
 }
 

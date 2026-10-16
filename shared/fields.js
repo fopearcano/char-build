@@ -100,9 +100,10 @@ export function fieldIndex() {
   return idx;
 }
 
-export function describeFieldIndex() {
+export function describeFieldIndex(section) {
   const lines = [];
   for (const [path, d] of Object.entries(fieldIndex())) {
+    if (section && d.section !== section) continue;
     let t;
     if (d.kind === 'number') t = `number ${d.min}..${d.max}`;
     else if (d.kind === 'enum') t = `one of [${d.options.join(', ')}]`;

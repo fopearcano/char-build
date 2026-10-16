@@ -227,7 +227,7 @@ export class Store {
         const chat = JSON.parse(await fs.readFile(path.join(this.chatDir, f), 'utf8'));
         if (filter.characterId && chat.characterId !== filter.characterId) continue;
         if (filter.mode && chat.mode !== filter.mode) continue;
-        out.push({ id: chat.id, mode: chat.mode, characterId: chat.characterId, title: chat.title, updatedAt: chat.updatedAt, turns: chat.display?.length || 0 });
+        out.push({ id: chat.id, mode: chat.mode, provider: chat.provider || 'anthropic', model: chat.model || null, characterId: chat.characterId, title: chat.title, updatedAt: chat.updatedAt, turns: chat.display?.length || 0 });
       } catch {
         // ignore unreadable chat files
       }

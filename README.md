@@ -4,10 +4,12 @@ A web app for designing fictional characters, built around Robert McKee’s
 *Character: The Art of Role and Cast Design for Page, Stage, and Screen*
 (2021). There are sixteen **stations**, one per stage of the book’s argument.
 Each one has structured fields, a live infographic, and rule-of-thumb
-**“McKee checks”** that cite the chapter they come from. An optional
-**Claude-powered coach** can brainstorm with you, critique a station, search
-the book, propose values you apply with one click, or play the character in a
-self-story interview.
+**“McKee checks”** that cite the chapter they come from. An optional **AI
+coach** can brainstorm with you, critique a station, search the book, propose
+values you apply with one click, or play the character in a self-story
+interview. It runs on Claude, OpenAI, Gemini, OpenRouter, Mistral, Groq,
+DeepSeek, xAI, a local Ollama or LM Studio model, or any OpenAI-compatible
+server.
 
 ![Builder — station 09, Dimensions](docs/screenshots/builder.png)
 
@@ -35,10 +37,10 @@ creates a sample story, *Undertow*, with a cast of six, so every chart has
 data to show. Delete the story whenever you like, or restore it from the
 library.
 
-The AI coach is optional. To turn it on, paste an Anthropic API key in the
-coach’s **⚙ settings** tab. You can also set `ANTHROPIC_API_KEY`, either in
-the environment or in a `.env` file (see `.env.example`), before you run
-`npm start`.
+The AI coach is optional. To turn it on, open the coach’s **⚙ settings**
+tab, choose a provider and paste its API key. You can also put the key in the
+environment or in a `.env` file before you run `npm start` (see
+`.env.example`), for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
 ## The sixteen stations
 
@@ -95,8 +97,8 @@ follows McKee’s advice to keep outer-circle roles lean.
 
 The ✦ **Coach** drawer has four tabs:
 
-* **Coach.** A Claude agent that reads the live profile and the station
-  you’re on. It has four tools:
+* **Coach.** An agent that reads the live profile and the station you’re
+  on. It has four tools:
   * `search_mckee_book` runs a full-text search over **your copy** of the
     book.
   * `analyze_character` runs the same diagnostics as the app.
@@ -109,22 +111,61 @@ The ✦ **Coach** drawer has four tabs:
   in her own voice, self-deceptions included. *Distill into profile* hands
   the transcript to the coach, which turns it into proposals.
 * **Book.** Local search over the epub. It needs no API key.
-* **Settings.** API key, model and effort, plus a connection test.
+* **Settings.** Choose the provider, then set its API key, base URL, model
+  and effort. *Load models* lists the models your key can use, and *Test
+  connection* checks that it works.
+
+### Providers
+
+| Provider | How it connects | Key (setting or env var) | Default model |
+|----------|-----------------|--------------------------|---------------|
+| Anthropic Claude | Anthropic SDK (native) | `ANTHROPIC_API_KEY` | `claude-opus-5-5` |
+| OpenAI | Chat Completions | `OPENAI_API_KEY` | `gpt-6.1-sol` |
+| Google Gemini | Google’s OpenAI-compatible endpoint | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.8-flash` |
+| OpenRouter | OpenAI-compatible | `OPENROUTER_API_KEY` | `openrouter/auto` |
+| Mistral | OpenAI-compatible | `MISTRAL_API_KEY` | `mistral-large-latest` |
+| Groq | OpenAI-compatible | `GROQ_API_KEY` | `openai/gpt-oss-120b` |
+| DeepSeek | OpenAI-compatible | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| xAI Grok | OpenAI-compatible | `XAI_API_KEY` | first model the key can use |
+| Ollama (local) | `http://localhost:11434/v1` | none | first installed model |
+| LM Studio (local) | `http://localhost:1234/v1` | none | the loaded model |
+| Custom | any OpenAI-compatible base URL | `CUSTOM_LLM_API_KEY` (optional) | first listed model |
+
+* Each provider also reads `<PREFIX>_BASE_URL` and `<PREFIX>_MODEL`, for
+  example `OPENAI_MODEL` or `OLLAMA_BASE_URL`. Settings saved in the app take
+  precedence over the environment.
+* `AI_PROVIDER` chooses the starting provider, for example `AI_PROVIDER=gemini`.
+  If it isn't set, the app uses the first provider it finds a key for.
+* Every provider gets the same tools and the same McKee method. Local models
+  get a shorter system prompt and look up field paths with an extra tool,
+  because their context windows are smaller.
+* For coaching, a local model has to support tool calling, for example qwen3
+  or llama3.1, and needs a context window of 16k tokens or more. If a model
+  can't call tools, the coach still answers, but book search and one-click
+  proposals are switched off for that reply.
+* "Local" means the computer running CharBuild, because that machine is the
+  one that calls the model.
+* Model lists change often. If a default model is retired, pick another one
+  with *Load models*.
+* A conversation stays with the provider it started on. To try another
+  provider, start a new conversation.
 
 Implementation notes:
 
-* The default model is `claude-opus-5-5`. It streams with adaptive thinking
-  (the reasoning summary shows in the chat), uses server-side refusal
-  fallbacks, and caches the prompt prefix.
+* With Claude, the coach streams with adaptive thinking (the reasoning
+  summary shows in the chat), uses server-side refusal fallbacks, and caches
+  the prompt prefix. With OpenAI-compatible providers, it streams Chat
+  Completions with function calling. When a model sends its reasoning
+  (DeepSeek, OpenRouter and some others do), that also shows in the chat.
 * Conversation history is **append-only**. The system prompt and tool set
   stay fixed for each conversation. The current character state is sent as a
   snapshot block inside the next message whenever it has changed, rather
   than by editing earlier context. Chats are saved in `data/chats/`.
-* The API key is stored only on your machine, in `data/settings.json`, and
-  the server never sends it back to the browser.
+* API keys are stored only on your machine, in `data/settings.json`, and
+  the server never sends them back to the browser.
 * **On a LAN:** every device on the network can use the coach, and the coach
-  uses the host's key. Only the host machine can change the key, model or
-  effort. To allow changes from other devices too, start the server with
+  uses the host's key. Only the host machine can change the provider, key,
+  model or effort. To allow changes from other devices too, start the server with
   `ALLOW_REMOTE_SETTINGS=1`.
 
 Without a key, everything except the Coach and Interview tabs works.
@@ -152,19 +193,22 @@ guidance is paraphrased, with chapter references. You can point
 | `HOST` | `0.0.0.0` | All interfaces, so the app is reachable on the LAN. Use `127.0.0.1` to make it local-only. |
 | `ALLOW_REMOTE_SETTINGS` | — | Set to `1` to let other devices change the AI key, model and effort. |
 | `DATA_DIR` | `./data` | |
-| `ANTHROPIC_API_KEY` | — | Optional. You can also set it in the app. |
-| `ANTHROPIC_MODEL` | `claude-opus-5-5` | The model chosen in the app’s settings takes precedence. |
+| `AI_PROVIDER` | first provider with a key | `anthropic`, `openai`, `gemini`, `openrouter`, `mistral`, `groq`, `deepseek`, `xai`, `ollama`, `lmstudio` or `custom` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | — | Optional. Each provider’s key, see [Providers](#providers). You can also set them in the app. |
+| `<PREFIX>_MODEL`, `<PREFIX>_BASE_URL` | per provider | For example `OPENAI_MODEL` or `OLLAMA_BASE_URL`. Settings saved in the app take precedence. |
 | `BOOK_PATH` | first `.epub` in `docs/` | |
 
 ## Project layout
 
 ```
-server/   Express app (index.js), JSON store, Claude agent (ai.js), epub search (book.js), sample seed
+server/   Express app (index.js), JSON store, coach (ai.js), provider registry (providers.js),
+          agent loops per API (llm/anthropic.js, llm/openai.js), epub search (book.js), sample seed
 shared/   Used by both browser and server: McKee catalog, the 16 stations, data model,
           field index and validation, analysis and checks, Markdown export
 public/   Single-page app (plain ES modules, no build step): app.js, forms.js, viz.js,
           castmap.js, assistant.js, css/app.css
-test/     node:test suites, including the agent loop against a scripted fake Claude client
+test/     node:test suites: the agent loops against scripted fake clients, and the real OpenAI SDK
+          against a local mock server
 ```
 
 ```bash

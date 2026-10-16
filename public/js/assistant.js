@@ -139,7 +139,8 @@ export class Assistant {
     const scrollTop = this.el.querySelector('.as-msgs')?.scrollTop;
     const draft = this.el.querySelector('#as-input')?.value;
     this.el.innerHTML = `<header class="as-head">
-        <div class="as-title">${icon('sparkle')}<div><b>McKee coach</b><small>${c ? `for ${esc(displayName(c))}` : 'open a character to begin'}</small></div></div>
+        <div class="as-title">${icon('sparkle')}<div><b>McKee coach</b><small>${c ? `for ${esc(displayName(c))}` : 'open a character to begin'}</small>
+          ${ai.providerLabel ? `<button class="as-via" data-as="tab" data-tab="settings" title="Change AI provider">${esc(ai.providerLabel)}${ai.model ? ` · ${esc(ai.model)}` : ''}${ai.configured ? '' : ' · not set up'}</button>` : ''}</div></div>
         <button class="icon-btn" data-as="close" aria-label="Close coach">${icon('x')}</button></header>
       <nav class="as-tabs" role="tablist">${tabs.map(([id, label, ic]) => `<button role="tab" aria-selected="${this.tab === id}" class="as-tab ${this.tab === id ? 'on' : ''}" data-as="tab" data-tab="${id}" ${label ? '' : 'aria-label="Settings"'}>${icon(ic)}${label ? `<span>${label}</span>` : ''}</button>`).join('')}</nav>
       <div class="as-body">${this.tab === 'book' ? this.bookHtml() : this.tab === 'settings' ? this.settingsHtml(ai) : this.chatHtml(this.tab, c, ai)}</div>`;
@@ -157,8 +158,8 @@ export class Assistant {
     const chat = this.chats[mode];
     const history = this.histories[mode];
     const setupHow = ai.canEditSettings === false
-      ? 'Add an Anthropic API key in the coach settings <b>on the computer running CharBuild</b> (or set <code>ANTHROPIC_API_KEY</code> there before <code>npm start</code>).'
-      : 'Add an Anthropic API key in <button class="link" data-as="tab" data-tab="settings">settings</button> (or set <code>ANTHROPIC_API_KEY</code> before <code>npm start</code>).';
+      ? 'Choose an AI provider (Claude, OpenAI, Gemini, a local Ollama model…) and add its key in the coach settings <b>on the computer running CharBuild</b>.'
+      : 'Choose an AI provider — Claude, OpenAI, Gemini, OpenRouter, a local Ollama model and more — in <button class="link" data-as="tab" data-tab="settings">settings</button>, or set a key such as <code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> before <code>npm start</code>.';
     const setup = ai.configured ? '' : `<div class="as-setup">${icon('info')}<div><b>AI is optional and not configured.</b><p>${setupHow} Everything else in CharBuild works without it.</p></div></div>`;
     const intro = mode === 'coach'
       ? `<div class="as-intro"><p>Ask anything about building <b>${esc(displayName(c))}</b>. The coach reads the live profile, searches McKee’s book, runs the diagnostics and proposes field values you can apply with one click.</p></div>`
@@ -168,7 +169,7 @@ export class Assistant {
       ? COACH_PROMPTS.map(([label, p]) => `<button class="chip small" data-as="prompt" data-prompt="${attr(p)}">${esc(label)}</button>`).join('')
       : INTERVIEW_PROMPTS.map((p) => `<button class="chip small" data-as="prompt" data-prompt="${attr(p)}">${esc(p)}</button>`).join('');
     return `${setup}
-      <div class="as-conv"><select data-as="conv" data-mode="${mode}" aria-label="Conversation"><option value="">New conversation</option>${history.map((h) => `<option value="${attr(h.id)}" ${chat?.id === h.id ? 'selected' : ''}>${esc(h.title)} · ${esc(timeAgo(h.updatedAt))}</option>`).join('')}</select>
+      <div class="as-conv"><select data-as="conv" data-mode="${mode}" aria-label="Conversation"><option value="">New conversation</option>${history.map((h) => `<option value="${attr(h.id)}" ${chat?.id === h.id ? 'selected' : ''}>${esc(h.title)} · ${esc(this.providerLabel(h.provider))} · ${esc(timeAgo(h.updatedAt))}</option>`).join('')}</select>
         <button class="icon-btn sm" data-as="new" data-mode="${mode}" title="New conversation">${icon('plus')}</button>
         ${chat ? `<button class="icon-btn sm" data-as="delete-conv" data-mode="${mode}" title="Delete conversation">${icon('trash')}</button>` : ''}
         ${mode === 'interview' && chat?.display?.length ? `<button class="btn sm" data-as="distill">${icon('sparkle')} Distill into profile</button>` : ''}</div>
@@ -185,6 +186,7 @@ export class Assistant {
     return `<div class="msg assistant">
       ${m.thinking ? `<details class="thinking"><summary>Reasoning</summary><div>${mdLite(m.thinking)}</div></details>` : ''}
       ${(m.tools || []).map((t) => `<div class="tool-badge">${icon(t.name === 'search_mckee_book' ? 'search' : 'chart')}<span>${esc(t.label)}</span>${t.results?.length ? `<small>${esc(t.results.map((r) => r.chapter).filter((v, i, a) => a.indexOf(v) === i).join(' · '))}</small>` : ''}</div>`).join('')}
+      ${(m.notices || []).map((n) => `<div class="notice">${icon('info')}<span>${esc(n)}</span></div>`).join('')}
       ${m.text ? `<div class="bubble">${mdLite(m.text)}</div>` : ''}
       ${(m.proposals || []).map((p) => this.proposalHtml(p, chatId)).join('')}
       ${m.error ? `<div class="bubble error">${icon('alert')} ${esc(m.error)}</div>` : ''}
@@ -244,18 +246,48 @@ export class Assistant {
         <button class="link" data-as="ask-passage" data-q="${attr(`${x.chapter}${x.section ? ` — ${x.section}` : ''}`)}">Ask the coach how this applies →</button></article>`).join('') : '<p class="as-empty">No passages found.</p>') : `<p class="as-empty">Searches your own copy of the book in <code>docs/</code> — no AI key needed.</p>`}</div>`;
   }
 
+  providerLabel(id) {
+    return (this.opts.getAI()?.providers || []).find((p) => p.id === (id || 'anthropic'))?.label || id || 'Anthropic Claude';
+  }
+
+  selectedProvider(ai) {
+    const list = ai.providers || [];
+    return list.find((p) => p.id === this.settingsProvider) || list.find((p) => p.id === ai.provider) || list[0];
+  }
+
   settingsHtml(ai) {
     const locked = ai.canEditSettings === false;
     const dis = locked ? 'disabled' : '';
+    const providers = ai.providers || [];
+    const sel = this.selectedProvider(ai);
+    if (!sel) return '<p class="as-empty">No AI providers available.</p>';
+    const inUse = sel.id === ai.provider;
+    const groups = [['cloud', 'Cloud APIs'], ['local', 'Local — runs on the CharBuild host'], ['other', 'Other']];
+    const options = groups.map(([g, label]) => `<optgroup label="${attr(label)}">${providers.filter((p) => p.group === g).map((p) => `<option value="${attr(p.id)}" ${p.id === sel.id ? 'selected' : ''}>${esc(p.label)}${p.configured ? ' ✓' : ''}${p.id === ai.provider ? ' — in use' : ''}</option>`).join('')}</optgroup>`).join('');
+    const keyState = sel.source === 'none' ? (sel.needsKey ? 'No key yet.' : 'No key needed.') : `Key from ${sel.source}${sel.keyHint ? ` (${sel.keyHint})` : ''}.`;
+    const loaded = this.modelLists?.[sel.id] || [];
+    const suggestions = [...new Set([...(sel.suggestions || []), ...loaded])];
+    const effortField = sel.kind === 'anthropic'
+      ? `<label class="field"><span class="lbl">Effort</span><select class="inp" id="as-effort" ${dis}>${['low', 'medium', 'high', 'xhigh', 'max'].map((e) => `<option ${sel.effort === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>`
+      : `<label class="field"><span class="lbl">Reasoning effort</span><select class="inp" id="as-reasoning" ${dis}><option value="">Model default</option>${['minimal', 'low', 'medium', 'high'].map((e) => `<option ${sel.reasoningEffort === e ? 'selected' : ''}>${e}</option>`).join('')}</select><span class="help">Only for reasoning models — leave on default otherwise.</span></label>`;
     return `<div class="as-settings">
-      <div class="status-row ${ai.configured ? 'ok' : ''}">${icon(ai.configured ? 'check' : 'info')}<div><b>${ai.configured ? 'AI configured' : 'AI not configured'}</b><small>${ai.configured ? `Key from ${esc(ai.source)}${ai.keyHint ? ` (${esc(ai.keyHint)})` : ''}` : 'CharBuild works fully without AI.'}</small></div></div>
-      ${locked ? `<div class="as-setup">${icon('info')}<div><b>Read-only on this device.</b><p>You’re connected over the network. The API key, model and effort can only be changed on the computer running CharBuild (or start it with <code>ALLOW_REMOTE_SETTINGS=1</code>).</p></div></div>` : ''}
-      <label class="field"><span class="lbl">Anthropic API key</span><input class="inp" type="password" id="as-key" placeholder="${ai.source === 'settings' ? 'Saved — enter a new key to replace' : 'sk-ant-…'}" autocomplete="off" ${dis}></label>
-      <p class="help">Stored on the host in <code>data/settings.json</code>; never sent back to the browser. Alternatively set <code>ANTHROPIC_API_KEY</code>.</p>
-      <label class="field"><span class="lbl">Model</span><input class="inp" id="as-model" value="${attr(ai.model || '')}" placeholder="claude-opus-5-5" ${dis}></label>
-      <label class="field"><span class="lbl">Effort</span><select class="inp" id="as-effort" ${dis}>${['low', 'medium', 'high', 'xhigh'].map((e) => `<option ${ai.effort === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>
-      <div class="row-btns">${locked ? '' : '<button class="btn primary sm" data-as="save-settings">Save</button>'}<button class="btn sm" data-as="test">Test connection</button>${ai.source === 'settings' && !locked ? '<button class="btn ghost sm" data-as="clear-key">Remove saved key</button>' : ''}</div>
+      <div class="status-row ${ai.configured ? 'ok' : ''}">${icon(ai.configured ? 'check' : 'info')}<div><b>The coach runs on ${esc(ai.providerLabel || 'Claude')}</b><small>${ai.configured ? esc(ai.model || 'first available model') : 'Not set up yet — CharBuild works fully without AI.'}</small></div></div>
+      ${locked ? `<div class="as-setup">${icon('info')}<div><b>Read-only on this device.</b><p>You’re connected over the network. AI providers, keys and models can only be changed on the computer running CharBuild (or start it with <code>ALLOW_REMOTE_SETTINGS=1</code>).</p></div></div>` : ''}
+      <label class="field"><span class="lbl">Provider</span><select class="inp" id="as-provider">${options}</select></label>
+      <div class="prov-card">
+        ${sel.note ? `<p class="help">${esc(sel.note)}</p>` : ''}
+        <label class="field"><span class="lbl">API key${sel.needsKey ? '' : ' <small>(optional)</small>'}</span><input class="inp" type="password" id="as-key" autocomplete="off" placeholder="${attr(sel.source === 'settings' ? 'Saved — type a new key to replace it' : sel.source.startsWith('env') ? 'Using the environment key — type to override' : 'Paste the key')}" ${dis}></label>
+        <p class="help">${esc(keyState)}${sel.keyUrl ? ` <a href="${attr(sel.keyUrl)}" target="_blank" rel="noopener">Get a key ↗</a>` : ''} Or set <code>${esc(sel.keyEnv?.[0] || '')}</code>.</p>
+        ${sel.kind === 'openai' ? `<label class="field"><span class="lbl">Base URL</span><input class="inp" id="as-base" value="${attr(sel.baseURL)}" placeholder="${attr(sel.defaultBaseURL || 'http://host:port/v1')}" ${dis}></label>` : ''}
+        <div class="field"><label class="lbl" for="as-model">Model</label><div class="model-row"><input class="inp" id="as-model" list="as-models" value="${attr(sel.model)}" placeholder="${attr(sel.defaultModel || 'auto — first available model')}" ${dis}><button class="btn sm" data-as="load-models">Load models</button></div>
+          <datalist id="as-models">${suggestions.map((m) => `<option value="${attr(m)}"></option>`).join('')}</datalist>
+          ${loaded.length ? `<span class="help">${loaded.length} models available — start typing to filter.</span>` : ''}</div>
+        ${effortField}
+      </div>
+      <div class="row-btns">${locked ? '' : `<button class="btn primary sm" data-as="save-settings">${inUse ? 'Save' : `Save &amp; use ${esc(sel.label)}`}</button>`}<button class="btn sm" data-as="test">Test connection</button>${sel.source === 'settings' && !locked ? '<button class="btn ghost sm" data-as="clear-key">Remove saved key</button>' : ''}</div>
       <p id="as-test" class="help"></p>
+      <details class="prov-list"><summary>All providers</summary><ul>${providers.map((p) => `<li class="${p.configured ? 'on' : ''}"><b>${esc(p.label)}</b><span>${p.configured ? (p.source.startsWith('env') ? 'key in environment' : p.needsKey ? 'key saved' : 'ready') : p.needsKey ? 'no key' : 'needs a base URL'}</span>${p.id === ai.provider ? '<em>in use</em>' : ''}</li>`).join('')}</ul></details>
+      <p class="help">Keys are stored on the host in <code>data/settings.json</code> and never sent back to the browser. Each conversation keeps the provider it started with.</p>
       <p class="help">Book search: ${ai.book?.available ? `${ai.book.passages} passages indexed from <code>${esc(ai.book.file)}</code>.` : esc(ai.book?.reason || 'unavailable')}</p>
     </div>`;
   }
@@ -271,6 +303,10 @@ export class Assistant {
   onChange(e) {
     const el = e.target;
     if (el.dataset.as === 'conv') this.selectConversation(el.dataset.mode, el.value);
+    if (el.id === 'as-provider') {
+      this.settingsProvider = el.value;
+      this.render();
+    }
   }
 
   async onClick(e) {
@@ -305,6 +341,7 @@ export class Assistant {
       else if (a === 'save-settings') await this.saveSettings();
       else if (a === 'clear-key') await this.saveSettings({ clearKey: true });
       else if (a === 'test') await this.testConnection();
+      else if (a === 'load-models') await this.loadModels();
       else if (a === 'ask-passage') {
         this.tab = 'coach';
         this.ask(`McKee writes about “${el.dataset.q}”. How does that apply to this character? Be specific and propose changes.`);
@@ -327,7 +364,7 @@ export class Assistant {
       this.chats[mode] = chat;
     }
     const userMsg = { role: 'user', text };
-    const live = { role: 'assistant', text: '', thinking: '', tools: [], proposals: [] };
+    const live = { role: 'assistant', text: '', thinking: '', tools: [], proposals: [], notices: [] };
     chat.display.push(userMsg, live);
     this.render();
     const liveEl = () => [...this.el.querySelectorAll('.as-msgs .msg.assistant')].pop();
@@ -377,12 +414,14 @@ export class Assistant {
             if (!chat.id) {
               chat.id = data.id;
               chat.title = data.title;
-              this.histories[mode] = [{ id: data.id, title: data.title, updatedAt: new Date().toISOString() }, ...this.histories[mode]];
+              chat.provider = data.provider;
+              this.histories[mode] = [{ id: data.id, title: data.title, provider: data.provider, updatedAt: new Date().toISOString() }, ...this.histories[mode]];
             }
           } else if (type === 'text') live.text += data.delta;
           else if (type === 'thinking') live.thinking += data.delta;
           else if (type === 'tool') live.tools.push(data);
           else if (type === 'proposal') live.proposals.push(data);
+          else if (type === 'notice') live.notices.push(data.message);
           else if (type === 'error') failed = data.message;
           paint();
         }
@@ -479,25 +518,77 @@ export class Assistant {
     this.render();
   }
 
+  // The provider fields as typed in the settings form.
+  settingsBody() {
+    const ai = this.opts.getAI() || {};
+    const id = this.selectedProvider(ai)?.id;
+    const body = { providerId: id };
+    const val = (sel) => this.el.querySelector(sel)?.value;
+    const key = val('#as-key')?.trim();
+    if (key) body.apiKey = key;
+    if (val('#as-model') !== undefined) body.model = val('#as-model').trim();
+    if (val('#as-base') !== undefined) body.baseURL = val('#as-base').trim();
+    if (val('#as-effort') !== undefined) body.effort = val('#as-effort');
+    if (val('#as-reasoning') !== undefined) body.reasoningEffort = val('#as-reasoning');
+    return body;
+  }
+
+  // Save the selected provider's fields (optionally making it the active one).
+  async persistFields({ activate = false } = {}) {
+    const ai = this.opts.getAI() || {};
+    if (ai.canEditSettings === false) return ai;
+    const body = this.settingsBody();
+    if (activate) body.provider = body.providerId;
+    const next = await this.opts.api('PUT', '/api/settings', body);
+    this.opts.setAI({ ...next, canEditSettings: ai.canEditSettings ?? next.canEditSettings });
+    return next;
+  }
+
   async saveSettings(extra = {}) {
-    const body = { ...extra };
-    const key = this.el.querySelector('#as-key')?.value.trim();
-    if (key && !extra.clearKey) body.apiKey = key;
-    const model = this.el.querySelector('#as-model')?.value.trim();
-    if (model !== undefined) body.model = model;
-    const effort = this.el.querySelector('#as-effort')?.value;
-    if (effort) body.effort = effort;
-    const ai = await this.opts.api('PUT', '/api/settings', body);
-    this.opts.setAI(ai);
-    toast(extra.clearKey ? 'Saved key removed' : 'Settings saved', 'success');
+    if (extra.clearKey) {
+      const ai = this.opts.getAI() || {};
+      const next = await this.opts.api('PUT', '/api/settings', { providerId: this.selectedProvider(ai)?.id, clearKey: true });
+      this.opts.setAI(next);
+      toast('Saved key removed', 'success');
+    } else {
+      const next = await this.persistFields({ activate: true });
+      toast(`Coach now runs on ${next.providerLabel}`, 'success');
+    }
     this.render();
   }
 
+  async loadModels() {
+    const ai = this.opts.getAI() || {};
+    const id = this.selectedProvider(ai)?.id;
+    await this.persistFields();
+    const out = this.el.querySelector('#as-test');
+    if (out) out.textContent = 'Loading models…';
+    try {
+      const res = await this.opts.api('GET', `/api/ai/models?provider=${encodeURIComponent(id)}`);
+      this.modelLists = { ...(this.modelLists || {}), [id]: res.models || [] };
+      this.render();
+      const after = this.el.querySelector('#as-test');
+      if (after) after.innerHTML = `${icon('check')} ${res.models.length} models loaded.`;
+      this.el.querySelector('#as-model')?.focus();
+    } catch (err) {
+      const after = this.el.querySelector('#as-test');
+      if (after) after.innerHTML = `${icon('alert')} ${esc(err.message)}`;
+    }
+  }
+
   async testConnection() {
+    const ai = this.opts.getAI() || {};
+    const id = this.selectedProvider(ai)?.id;
+    await this.persistFields();
+    this.render();
     const out = this.el.querySelector('#as-test');
     if (out) out.textContent = 'Testing…';
-    const r = await this.opts.api('POST', '/api/ai/test');
-    if (out) out.innerHTML = r.ok ? `${icon('check')} Connected — ${esc(r.name || r.model)}` : `${icon('alert')} ${esc(r.error)}`;
+    const r = await this.opts.api('POST', '/api/ai/test', { provider: id });
+    const target = this.el.querySelector('#as-test');
+    if (!target) return;
+    target.innerHTML = r.ok
+      ? `${icon('check')} Connected to ${esc(r.provider || '')} — ${esc(r.name || r.model)}${r.warning ? `<br>${icon('alert')} ${esc(r.warning)}` : ''}`
+      : `${icon('alert')} ${esc(r.error)}`;
   }
 }
 

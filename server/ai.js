@@ -1,15 +1,15 @@
-// Optional AI support: a Claude-powered "McKee coach" that proposes
-// field-level updates, and an "interview" mode in which the character tells
-// her self-story in her own voice. Streams to the browser over SSE.
+// Optional AI support: a "McKee coach" that proposes field-level updates,
+// and an "interview" mode in which the character tells her self-story in her
+// own voice. Streams to the browser over SSE. Works with Claude (Anthropic
+// SDK) or any OpenAI-compatible service (see providers.js).
 //
-// History is append-only: each conversation keeps the full API message list
-// (thinking and tool blocks included) and only ever appends to it; the
-// system prompt and tool set are fixed per mode. The live character state
-// rides along as a snapshot block in the next user message whenever it
-// changes, instead of editing the system prompt.
+// History is append-only: each conversation keeps the full provider message
+// list (thinking and tool blocks included) and only ever appends to it; the
+// system prompt and tool set are fixed per mode and provider. The live
+// character state rides along as a snapshot block in the next user message
+// whenever it changes, instead of editing the system prompt.
 
 import crypto from 'node:crypto';
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import * as K from '../shared/catalog.js';
 import { SECTIONS, SECTION_BY_ID } from '../shared/sections.js';
@@ -18,9 +18,11 @@ import { characterChecks, characterDigest, overallProgress, antagonismProfile, t
 import { displayName, uid } from '../shared/model.js';
 import { searchBook, bookStatus } from './book.js';
 import { updateContext } from './store.js';
+import { PROVIDERS, PROVIDER_BY_ID, ANTHROPIC_EFFORTS, REASONING_EFFORTS, resolveProvider, activeProviderId, publicProvider, pickChatModel } from './providers.js';
+import { createAnthropicClient, runAnthropicTurn, testAnthropic, listAnthropicModels, closingMessage as anthropicClosing } from './llm/anthropic.js';
+import { createOpenAIClient, runOpenAITurn, listOpenAIModels, closingMessage as openaiClosing } from './llm/openai.js';
 
-export const DEFAULT_MODEL = 'claude-opus-5-5';
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const DEFAULT_MODEL = PROVIDER_BY_ID.anthropic.defaultModel;
 const MAX_ITERATIONS = 8;
 
 // ── Prompts (frozen per mode so the prefix stays cacheable) ──────────────
@@ -29,30 +31,42 @@ function frameworkSummary() {
   return SECTIONS.map((s) => `${s.num} ${s.title} (${s.subtitle}; Ch. ${s.chapters.join(', ')}): ${s.principle}`).join('\n');
 }
 
-const COACH_SYSTEM = `You are the CharBuild Coach, a character-design collaborator for fiction writers. Your method is Robert McKee's book CHARACTER: The Art of Role and Cast Design for Page, Stage, and Screen (2021). The writer is building a character in a structured builder app whose sixteen stations follow the book.
+const COACH_RULES = `You are the CharBuild Coach, a character-design collaborator for fiction writers. Your method is Robert McKee's book CHARACTER: The Art of Role and Cast Design for Page, Stage, and Screen (2021). The writer is building a character in a structured builder app whose sixteen stations follow the book.
 
 How you work:
 - Think like McKee: push for specificity over generality, contradiction over consistency, choices under pressure over description. Hunt clichés and name them. Keep the protagonist an underdog, find the Center of Good, make the conscious and subconscious desires collide, give dimensions both poles in action, and tune the inciting incident to the character's need.
 - Be a collaborator, not a lecturer. Ask one or two sharp questions when the writer's intent is unclear; offer two or three distinct options when brainstorming. Keep chat replies short and concrete (a few short paragraphs or a tight list). Cite chapters like "(Ch. 9)".
 - Ground claims about the book with the search_mckee_book tool when a point is specific or the writer asks "what does McKee say". The book is copyrighted: paraphrase, and quote at most a sentence or two at a time.
-- When you have concrete content for the builder, call propose_character_updates. The writer reviews every proposal and applies it with a click, so propose freely but precisely: use exact paths and option ids from the field index below, fill empty fields first, and say in "rationale" why each value serves the character. Don't overwrite a filled field unless you are improving it and say so. Never claim that an update was applied — only the writer can apply it.
+- When you have concrete content for the builder, call propose_character_updates. The writer reviews every proposal and applies it with a click, so propose freely but precisely: use exact paths and option ids from the field index, fill empty fields first, and say in "rationale" why each value serves the character. Don't overwrite a filled field unless you are improving it and say so. Never claim that an update was applied — only the writer can apply it.
 - Use analyze_character for a McKee diagnostic of the live character (progress, checks, scores) before giving an overall critique.
 - Use propose_cast_member to suggest new roles (foils, antagonists, first-circle helpers) that would draw out specific dimensions.
 - Each user turn may begin with a <character_snapshot> of the live character and a <focus> naming the station the writer is on. The newest snapshot is the truth; earlier ones are history.
 - Write in the writer's language. Never invent facts about the writer's story that contradict the snapshot.
 
 The sixteen stations:
-${frameworkSummary()}
+${frameworkSummary()}`;
 
-Field index (path — label — type). Lists accept op "append" with one item object; multi-selects accept "set" (whole array) or "append"; everything else uses "set". New list items get ids automatically, but you may set an "id" on a new dimension (e.g. "dim_pride") so other updates in the same proposal can reference it.
-${describeFieldIndex()}
+const FIELD_INDEX_NOTE = 'Lists accept op "append" with one item object; multi-selects accept "set" (whole array) or "append"; everything else uses "set". New list items get ids automatically, but you may set an "id" on a new dimension (e.g. "dim_pride") so other updates in the same proposal can reference it.';
 
-Option glossary:
+const OPTION_GLOSSARY = `Option glossary:
 Circles: ${K.CIRCLES.map((o) => `${o.id}=${o.label}`).join('; ')}
 Dimension types: ${K.DIMENSION_TYPES.map((o) => `${o.id}=${o.label}`).join('; ')}
 Self levels: ${K.SELF_LEVELS.map((o) => `${o.id}=${o.label}`).join('; ')}
 Primary genres: ${K.PRIMARY_GENRES.map((g) => `${g.id}=${g.label} (core value ${g.coreValue}; core cast ${g.coreCast.join('/')})`).join('; ')}
 MO themes: ${K.MO_THEMES.map((o) => `${o.id}=${o.label}`).join('; ')}`;
+
+const COACH_SYSTEM = `${COACH_RULES}
+
+Field index (path — label — type). ${FIELD_INDEX_NOTE}
+${describeFieldIndex()}
+
+${OPTION_GLOSSARY}`;
+
+// For local models with small context windows: the field index is fetched
+// on demand with list_fields instead of riding in every request.
+const COACH_SYSTEM_COMPACT = `${COACH_RULES}
+
+Before proposing updates, call list_fields with the station id (${SECTIONS.map((s) => s.id).join(', ')}) to get the exact paths, types and option ids. ${FIELD_INDEX_NOTE}`;
 
 const INTERVIEW_SYSTEM = `You are performing a fictional character in an improvised interview with the writer who is creating you. This is McKee's "self-story" exercise (CHARACTER, Ch. 4): the writer sits the character down and asks about high points, low points, turning points, successes, failures, dilemmas and beliefs, then judges truth from self-serving spin.
 
@@ -88,7 +102,7 @@ const COACH_TOOLS = [
   },
   {
     name: 'propose_character_updates',
-    description: 'Propose concrete values for fields of the current character. The writer sees each update with your rationale and applies or dismisses it. Paths and value types must match the field index in the system prompt.',
+    description: 'Propose concrete values for fields of the current character. The writer sees each update with your rationale and applies or dismisses it. Paths and value types must match the field index.',
     eager_input_streaming: true,
     input_schema: {
       type: 'object',
@@ -133,11 +147,55 @@ const COACH_TOOLS = [
   },
 ];
 
+const LIST_FIELDS_TOOL = {
+  name: 'list_fields',
+  description: 'List the editable field paths, types and option ids of one builder station, for use with propose_character_updates.',
+  input_schema: {
+    type: 'object',
+    properties: { station: { type: 'string', enum: SECTIONS.map((s) => s.id), description: 'Station id.' } },
+    required: ['station'],
+  },
+};
+
+// The tool set for a conversation, fixed by provider. OpenAI-compatible
+// services get plain JSON schemas: no Anthropic-only fields, no empty
+// parameter objects, and update values as JSON text, which every
+// function-calling implementation accepts.
+function coachToolsFor(cfg) {
+  if (cfg.kind === 'anthropic') return COACH_TOOLS;
+  const tools = structuredClone(COACH_TOOLS).map(({ eager_input_streaming, ...t }) => t); // eslint-disable-line no-unused-vars
+  tools.find((t) => t.name === 'analyze_character').input_schema = {
+    type: 'object',
+    properties: { focus: { type: 'string', description: 'Optional station id to focus the checks on, e.g. "dimensions".' } },
+  };
+  tools.find((t) => t.name === 'propose_character_updates').input_schema.properties.updates.items.properties.value = {
+    type: 'string',
+    description: 'The value as JSON: "quoted text", 7, true, ["option_id", …] or an object such as {"positive":"Proud","negative":"Ashamed"} for a list item. Plain text is fine for text fields.',
+  };
+  if (cfg.compactPrompt) tools.push(LIST_FIELDS_TOOL);
+  return tools;
+}
+
+// Values that arrive as JSON text (OpenAI-compatible tools) become real values.
+function parseLoose(v) {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  if (/^(\{|\[|"|-?\d|true$|false$|null$)/.test(t)) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return v;
+    }
+  }
+  return v;
+}
+
 const SearchInput = z.object({ query: z.string().min(1).max(300), max_results: z.number().int().min(1).max(8).optional() });
 const ProposeInput = z.object({
   summary: z.string().max(500),
   updates: z.array(z.object({ path: z.string(), op: z.enum(['set', 'append']).optional(), value: z.any(), rationale: z.string().max(1500).optional() })).min(1).max(24),
 });
+const ListFieldsInput = z.object({ station: z.enum(SECTIONS.map((s) => s.id)) });
 const CastInput = z.object({
   name: z.string().min(1).max(120),
   roleLabel: z.string().max(120),
@@ -151,38 +209,136 @@ const CastInput = z.object({
 // ── Service ───────────────────────────────────────────────────────────────
 
 export function createAI({ store, rootDir, makeClient }) {
-  const credentials = () => {
-    if (store.settings.apiKey) return { source: 'settings', apiKey: store.settings.apiKey };
-    if (process.env.ANTHROPIC_API_KEY) return { source: 'env', apiKey: process.env.ANTHROPIC_API_KEY };
-    if (process.env.ANTHROPIC_AUTH_TOKEN) return { source: 'env-token' };
-    return { source: 'none' };
+  const providerCfg = (id) => resolveProvider(store.settings, id);
+  const activeCfg = () => providerCfg(activeProviderId(store.settings));
+  const clientFor = (cfg) => {
+    if (makeClient) return makeClient(cfg);
+    return cfg.kind === 'anthropic' ? createAnthropicClient(cfg) : createOpenAIClient(cfg);
   };
-
-  const client = () => {
-    const cred = credentials();
-    if (makeClient) return makeClient(cred);
-    return cred.apiKey ? new Anthropic({ apiKey: cred.apiKey }) : new Anthropic();
-  };
-
-  const model = () => store.settings.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
-  const effort = () => (EFFORTS.includes(store.settings.effort) ? store.settings.effort : 'medium');
+  const autoModels = new Map(); // provider+baseURL → model picked from its /models list
 
   function status() {
-    const cred = credentials();
-    const key = cred.apiKey || '';
+    const a = activeCfg();
     return {
-      configured: cred.source !== 'none',
-      source: cred.source,
-      keyHint: key ? `${key.slice(0, 7)}…${key.slice(-4)}` : null,
-      model: model(),
-      effort: effort(),
+      provider: a.id,
+      providerLabel: a.label,
+      configured: a.configured,
+      source: a.source,
+      keyHint: a.keyHint,
+      model: a.model || autoModels.get(`${a.id}|${a.baseURL}`) || '',
+      effort: a.effort,
+      reasoningEffort: a.reasoningEffort,
+      baseURL: a.baseURL,
+      providers: PROVIDERS.map((d) => publicProvider(providerCfg(d.id))),
       book: bookStatus(rootDir),
     };
   }
 
-  async function test() {
-    const info = await client().models.retrieve(model());
-    return { ok: true, model: info.id, name: info.display_name };
+  async function updateSettings(body = {}) {
+    const { provider, providerId, apiKey, clearKey, model, baseURL, effort, reasoningEffort } = body;
+    const bad = (msg) => Object.assign(new Error(msg), { status: 400 });
+    if (provider != null && !PROVIDER_BY_ID[provider]) throw bad(`Unknown AI provider "${provider}"`);
+    const id = providerId || provider || activeProviderId(store.settings);
+    if (!PROVIDER_BY_ID[id]) throw bad(`Unknown AI provider "${id}"`);
+
+    const providers = structuredClone(store.settings.providers || {});
+    const patch = {};
+    // Older versions kept Claude's settings at the top level; move them.
+    if (store.settings.apiKey || store.settings.model || store.settings.effort) {
+      providers.anthropic = { apiKey: store.settings.apiKey, model: store.settings.model, effort: store.settings.effort, ...(providers.anthropic || {}) };
+      Object.assign(patch, { apiKey: null, model: null, effort: null });
+    }
+    const cur = { ...(providers[id] || {}) };
+    if (clearKey) delete cur.apiKey;
+    else if (typeof apiKey === 'string' && apiKey.trim()) cur.apiKey = apiKey.trim();
+    if (typeof model === 'string') {
+      if (model.trim()) cur.model = model.trim().slice(0, 200);
+      else delete cur.model;
+    }
+    if (typeof baseURL === 'string') {
+      const b = baseURL.trim();
+      if (b && !/^https?:\/\/[^\s]+$/i.test(b)) throw bad('Base URL must start with http:// or https://');
+      if (b) cur.baseURL = b;
+      else delete cur.baseURL;
+    }
+    if (typeof effort === 'string') {
+      if (ANTHROPIC_EFFORTS.includes(effort)) cur.effort = effort;
+      else delete cur.effort;
+    }
+    if (typeof reasoningEffort === 'string') {
+      if (REASONING_EFFORTS.includes(reasoningEffort)) cur.reasoningEffort = reasoningEffort;
+      else delete cur.reasoningEffort;
+    }
+    for (const k of Object.keys(cur)) if (cur[k] == null || cur[k] === '') delete cur[k];
+    if (Object.keys(cur).length) providers[id] = cur;
+    else delete providers[id];
+    patch.providers = providers;
+    if (provider) patch.provider = provider;
+    await store.saveSettings(patch);
+    autoModels.clear();
+    return status();
+  }
+
+  function requireConfigured(cfg) {
+    if (cfg.configured) return;
+    const msg = cfg.needsKey
+      ? `${cfg.label} has no API key yet. Add one in the coach settings (or set ${cfg.envPrefix}_API_KEY).`
+      : `${cfg.label} needs a base URL. Set it in the coach settings.`;
+    throw Object.assign(new Error(msg), { status: 400 });
+  }
+
+  async function listModels(id) {
+    const cfg = providerCfg(id || activeProviderId(store.settings));
+    requireConfigured(cfg);
+    try {
+      const client = clientFor(cfg);
+      return cfg.kind === 'anthropic' ? await listAnthropicModels(client) : await listOpenAIModels(client);
+    } catch (err) {
+      err.provider = cfg;
+      throw err;
+    }
+  }
+
+  async function test(id) {
+    const cfg = providerCfg(id || activeProviderId(store.settings));
+    if (!cfg.configured) return { ok: false, error: cfg.needsKey ? `${cfg.label} has no API key yet.` : `${cfg.label} needs a base URL.` };
+    try {
+      const client = clientFor(cfg);
+      if (cfg.kind === 'anthropic') return { ...(await testAnthropic(client, cfg)), provider: cfg.label };
+      const ids = await listOpenAIModels(client);
+      if (!cfg.model) {
+        const pick = pickChatModel(ids);
+        return pick
+          ? { ok: true, provider: cfg.label, model: pick, name: `${pick} (auto)`, count: ids.length }
+          : { ok: false, provider: cfg.label, error: `${cfg.label} answered but lists no models. Install or load one first.` };
+      }
+      const listed = !ids.length || ids.includes(cfg.model);
+      return {
+        ok: true,
+        provider: cfg.label,
+        model: cfg.model,
+        name: cfg.model,
+        count: ids.length,
+        warning: listed ? undefined : `“${cfg.model}” isn’t in ${cfg.label}’s model list (${ids.length} models). Use Load models to pick one.`,
+      };
+    } catch (err) {
+      err.provider = cfg;
+      throw err;
+    }
+  }
+
+  async function withModel(cfg, client, emit) {
+    if (cfg.model) return cfg;
+    const key = `${cfg.id}|${cfg.baseURL}`;
+    let model = autoModels.get(key);
+    if (!model) {
+      const ids = cfg.kind === 'anthropic' ? await listAnthropicModels(client) : await listOpenAIModels(client);
+      model = pickChatModel(ids);
+      if (!model) throw Object.assign(new Error(`${cfg.label} lists no models. Install or load one, or set a model in the coach settings.`), { status: 400 });
+      autoModels.set(key, model);
+      emit('notice', { message: `Using ${cfg.label} model “${model}”.` });
+    }
+    return { ...cfg, model };
   }
 
   function contextFor(characterId) {
@@ -192,7 +348,7 @@ export function createAI({ store, rootDir, makeClient }) {
     return { character, story, cast };
   }
 
-  async function runTool(name, input, chat, emit) {
+  async function runTool(name, input, chat, emit, opts = {}) {
     switch (name) {
       case 'search_mckee_book': {
         const parsed = SearchInput.safeParse(input);
@@ -208,7 +364,8 @@ export function createAI({ store, rootDir, makeClient }) {
         const progress = overallProgress(character, story);
         const ap = antagonismProfile(character);
         const td = traitDensity(character);
-        const checks = characterChecks(character, story, cast);
+        const focus = SECTION_BY_ID[input?.focus] ? input.focus : null;
+        const checks = characterChecks(character, story, cast).filter((c) => !focus || c.section === focus);
         emit('tool', { name, label: 'Ran the McKee diagnostics' });
         return {
           content: JSON.stringify({
@@ -222,21 +379,26 @@ export function createAI({ store, rootDir, makeClient }) {
           }),
         };
       }
+      case 'list_fields': {
+        const parsed = ListFieldsInput.safeParse(input);
+        if (!parsed.success) return { error: true, content: `station must be one of: ${SECTIONS.map((s) => s.id).join(', ')}` };
+        return { content: describeFieldIndex(parsed.data.station) };
+      }
       case 'propose_character_updates': {
         const parsed = ProposeInput.safeParse(input);
         if (!parsed.success) return { error: true, content: JSON.stringify({ INVALID_JSON: JSON.stringify(input) }) };
+        const updates = opts.looseValues ? parsed.data.updates.map((u) => ({ ...u, value: parseLoose(u.value) })) : parsed.data.updates;
         const { character, cast } = contextFor(chat.characterId);
-        const ctx = updateContext(character, cast, parsed.data.updates);
+        const ctx = updateContext(character, cast, updates);
         const accepted = [];
         const rejected = [];
-        for (const u of parsed.data.updates) {
+        for (const u of updates) {
           const r = validateUpdate(u, ctx);
           if (r.ok) accepted.push({ ...r.update, rationale: u.rationale || '' });
           else rejected.push(r.error);
         }
         if (accepted.length) {
           const proposal = { id: uid('prop'), kind: 'updates', characterId: chat.characterId, summary: parsed.data.summary, updates: accepted, status: 'pending' };
-          chat.pendingProposals.push(proposal);
           emit('proposal', proposal);
         }
         const parts = [];
@@ -249,7 +411,6 @@ export function createAI({ store, rootDir, makeClient }) {
         if (!parsed.success) return { error: true, content: JSON.stringify({ INVALID_JSON: JSON.stringify(input) }) };
         const { character } = contextFor(chat.characterId);
         const proposal = { id: uid('prop'), kind: 'cast', characterId: chat.characterId, storyId: character.storyId, summary: `New cast member: ${parsed.data.name}`, member: parsed.data, status: 'pending' };
-        chat.pendingProposals.push(proposal);
         emit('proposal', proposal);
         return { content: `Suggested ${parsed.data.name} to the writer as a ${parsed.data.circle}-circle role. Not added until the writer accepts.` };
       }
@@ -258,18 +419,20 @@ export function createAI({ store, rootDir, makeClient }) {
     }
   }
 
-  function snapshotBlock(chat, section) {
+  // Text blocks prepended to the user's message: the character snapshot
+  // when it changed since the last turn, and the station in focus.
+  function contextBlocks(chat, section) {
     const { character, story, cast } = contextFor(chat.characterId);
     const digest = characterDigest(character, story, cast);
     const hash = crypto.createHash('sha1').update(digest).digest('hex');
     const blocks = [];
     if (hash !== chat.snapshotHash) {
       chat.snapshotHash = hash;
-      blocks.push({ type: 'text', text: chat.mode === 'interview' ? `<dossier>\n${digest}\n</dossier>` : `<character_snapshot>\n${digest}\n</character_snapshot>` });
+      blocks.push(chat.mode === 'interview' ? `<dossier>\n${digest}\n</dossier>` : `<character_snapshot>\n${digest}\n</character_snapshot>`);
     }
     if (chat.mode === 'coach' && section && SECTION_BY_ID[section]) {
       const s = SECTION_BY_ID[section];
-      blocks.push({ type: 'text', text: `<focus>The writer is on station ${s.num} “${s.title}” (Ch. ${s.chapters.join(', ')}).</focus>` });
+      blocks.push(`<focus>The writer is on station ${s.num} “${s.title}” (Ch. ${s.chapters.join(', ')}).</focus>`);
     }
     return blocks;
   }
@@ -278,6 +441,7 @@ export function createAI({ store, rootDir, makeClient }) {
     if (conversationId) {
       const chat = await store.loadChat(conversationId);
       if (!chat) throw Object.assign(new Error('Conversation not found'), { status: 404 });
+      chat.provider = chat.provider || 'anthropic'; // conversations from before multi-provider support
       return chat;
     }
     const character = store.getCharacter(characterId);
@@ -285,6 +449,7 @@ export function createAI({ store, rootDir, makeClient }) {
     return {
       id: uid('chat'),
       mode,
+      provider: activeProviderId(store.settings),
       characterId,
       storyId: character.storyId,
       title: mode === 'interview' ? `Interview with ${displayName(character)}` : `Coaching ${displayName(character)}`,
@@ -303,102 +468,65 @@ export function createAI({ store, rootDir, makeClient }) {
     if (!text) throw Object.assign(new Error('Empty message'), { status: 400 });
     if (text.length > 20000) throw Object.assign(new Error('Message too long'), { status: 400 });
     const chat = await getOrCreateChat({ conversationId, mode, characterId });
-    chat.pendingProposals = [];
-    emit('conversation', { id: chat.id, mode: chat.mode, title: chat.title });
+    // A conversation stays with the provider it started on: message formats
+    // (and thinking blocks) aren't portable between APIs.
+    let cfg = providerCfg(chat.provider);
+    emit('conversation', { id: chat.id, mode: chat.mode, title: chat.title, provider: cfg.id, providerLabel: cfg.label });
+    const display = { role: 'assistant', text: '', thinking: '', tools: [], proposals: [], notices: [], provider: cfg.id };
+    const tracked = (type, data) => {
+      if (type === 'text') display.text += data.delta;
+      else if (type === 'thinking') display.thinking += data.delta;
+      else if (type === 'tool') display.tools.push(data);
+      else if (type === 'proposal') display.proposals.push(data);
+      else if (type === 'notice') display.notices.push(data.message);
+      emit(type, data);
+    };
+    const active = activeProviderId(store.settings);
+    if (conversationId && chat.provider !== active) {
+      tracked('notice', { message: `This conversation runs on ${cfg.label}. Start a new conversation to use ${PROVIDER_BY_ID[active].label}.` });
+    }
 
     const prevHash = chat.snapshotHash;
-    const userContent = [...snapshotBlock(chat, section), { type: 'text', text }];
-    const turn = [{ role: 'user', content: userContent }];
-    const display = { role: 'assistant', text: '', thinking: '', tools: [], proposals: [] };
-    const anthropic = client();
-    const system = mode === 'interview' ? INTERVIEW_SYSTEM : COACH_SYSTEM;
-    let stopReason = null;
-    let jsonRetries = 0;
-
+    let result;
     try {
-      for (let i = 0; i < MAX_ITERATIONS; i++) {
-        const params = {
-          model: model(),
-          max_tokens: 64000,
-          system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-          messages: [...chat.messages, ...turn],
-          thinking: { type: 'adaptive', display: 'summarized' },
-          output_config: { effort: effort() },
-          betas: ['server-side-fallback-2026-07-01'],
-          fallbacks: 'default',
-        };
-        if (mode === 'coach') params.tools = COACH_TOOLS;
-
-        const stream = anthropic.beta.messages.stream(params, { signal });
-        let msg;
-        try {
-          for await (const event of stream) {
-            if (event.type === 'content_block_delta') {
-              if (event.delta.type === 'text_delta') {
-                display.text += event.delta.text;
-                emit('text', { delta: event.delta.text });
-              } else if (event.delta.type === 'thinking_delta') {
-                display.thinking += event.delta.thinking;
-                emit('thinking', { delta: event.delta.thinking });
-              }
-            } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
-              emit('tool_start', { name: event.content_block.name });
-            } else if (event.type === 'content_block_start' && event.content_block.type === 'text' && display.text && !display.text.endsWith('\n')) {
-              // separate prose from successive tool rounds
-              display.text += '\n\n';
-              emit('text', { delta: '\n\n' });
-            }
-          }
-          msg = await stream.finalMessage();
-          jsonRetries = 0;
-        } catch (err) {
-          // With eager input streaming an unparseable tool input rejects the
-          // stream with the SDK's "Unable to parse tool parameter JSON" error;
-          // retry that turn a couple of times. Everything else is rethrown.
-          const jsonError = err instanceof Anthropic.AnthropicError && !(err instanceof Anthropic.APIError) && /parse tool parameter JSON/i.test(err.message);
-          if (!jsonError || signal?.aborted || jsonRetries++ >= 2) throw err;
-          emit('notice', { message: 'Retrying a malformed tool call…' });
-          continue;
-        }
-
-        stopReason = msg.stop_reason;
-        if (stopReason === 'refusal') {
-          throw Object.assign(new Error('The model declined this request. Try rephrasing it.'), { status: 422 });
-        }
-        const toolUses = msg.content.filter((b) => b.type === 'tool_use');
-        if (stopReason === 'max_tokens' && toolUses.length) throw new Error('A tool call was cut off (max_tokens). Try a narrower request.');
-        turn.push({ role: 'assistant', content: msg.content });
-        if (stopReason === 'pause_turn') continue;
-        if (!toolUses.length) break;
-
-        const results = [];
-        for (const tu of toolUses) {
-          const r = await runTool(tu.name, tu.input, chat, (type, data) => {
-            if (type === 'tool') display.tools.push(data);
-            if (type === 'proposal') display.proposals.push(data);
-            emit(type, data);
-          });
-          results.push({ type: 'tool_result', tool_use_id: tu.id, content: r.content, ...(r.error ? { is_error: true } : {}) });
-        }
-        turn.push({ role: 'user', content: results });
-        if (i === MAX_ITERATIONS - 1) emit('notice', { message: 'Stopped after several tool rounds.' });
-      }
+      requireConfigured(cfg);
+      const client = clientFor(cfg);
+      cfg = await withModel(cfg, client, tracked);
+      display.model = cfg.model;
+      const userBlocks = [...contextBlocks(chat, section), text];
+      const system = mode === 'interview' ? INTERVIEW_SYSTEM : cfg.compactPrompt ? COACH_SYSTEM_COMPACT : COACH_SYSTEM;
+      const run = cfg.kind === 'anthropic' ? runAnthropicTurn : runOpenAITurn;
+      result = await run({
+        client,
+        cfg,
+        system,
+        history: chat.messages,
+        userBlocks,
+        tools: mode === 'coach' ? coachToolsFor(cfg) : null,
+        runTool: (name, input, opts) => runTool(name, input, chat, tracked, opts),
+        emit: tracked,
+        signal,
+        maxIterations: MAX_ITERATIONS,
+      });
     } catch (err) {
       chat.snapshotHash = prevHash; // nothing from this turn is kept
+      err.provider = err.provider || cfg;
       throw err;
     }
 
-    // The turn completed: append it (never rewrite earlier history).
-    // A trailing tool_result turn (iteration cap) would leave the model
-    // waiting on a reply, so close it with a short assistant note.
-    if (turn[turn.length - 1].role === 'user') turn.push({ role: 'assistant', content: [{ type: 'text', text: '(Paused after several tool rounds.)' }] });
+    // The turn completed: append it (never rewrite earlier history). If the
+    // iteration cap left tool results unanswered, close with a short note.
+    const turn = result.messages;
+    if (turn[turn.length - 1].role !== 'assistant') {
+      turn.push((cfg.kind === 'anthropic' ? anthropicClosing : openaiClosing)('(Paused after several tool rounds.)'));
+    }
     chat.messages.push(...turn);
+    chat.model = cfg.model;
     chat.display.push({ role: 'user', text, section: section || null, at: new Date().toISOString() });
     chat.display.push({ ...display, at: new Date().toISOString() });
     chat.updatedAt = new Date().toISOString();
-    delete chat.pendingProposals;
     await store.saveChat(chat);
-    emit('done', { stopReason, conversationId: chat.id });
+    emit('done', { stopReason: result.stopReason, conversationId: chat.id });
     return chat;
   }
 
@@ -410,11 +538,11 @@ export function createAI({ store, rootDir, makeClient }) {
     return { ok: true };
   }
 
-  return { status, test, chat, setProposalStatus };
+  return { status, test, listModels, updateSettings, chat, setProposalStatus };
 }
 
 export function publicChat(chat) {
   if (!chat) return null;
   const { messages, snapshotHash, ...rest } = chat;
-  return rest;
+  return { ...rest, provider: rest.provider || 'anthropic' };
 }

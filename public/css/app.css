@@ -906,6 +906,20 @@ path.pan.ant { fill: color-mix(in srgb, var(--antagonism) 75%, var(--surface)); 
 .status-row.ok .ic { color: var(--good); }
 .status-row small { display: block; font-size: 12px; color: var(--muted); }
 .row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.as-via { display: block; margin-top: 2px; padding: 0; border: 0; background: none; cursor: pointer; font-size: 11.5px; font-weight: 650; color: var(--dimension); text-align: left; }
+.as-via:hover { text-decoration: underline; }
+.prov-card { display: grid; gap: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.prov-card .inp { background-color: var(--surface); }
+.model-row { display: flex; gap: 6px; align-items: center; }
+.model-row .inp { flex: 1; }
+.prov-list summary { cursor: pointer; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
+.prov-list ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.prov-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); color: var(--muted); }
+.prov-list li.on { color: var(--ink); }
+.prov-list li b { font-weight: 650; }
+.prov-list li em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--dimension); }
+.notice { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--muted); }
+.notice .ic { width: 14px; height: 14px; margin-top: 1px; }
 
 /* ── Modal & toasts ───────────────────────────────────────────────────── */
 .modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(20, 15, 5, 0.42); display: grid; place-items: center; padding: 16px; animation: fade 0.15s; }

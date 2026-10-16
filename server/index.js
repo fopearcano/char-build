@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Store, HttpError, validId } from './store.js';
 import { sampleData } from './sample.js';
 import { createAI, publicChat } from './ai.js';
@@ -103,13 +104,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
     if (!canEditSettings(req)) {
       throw new HttpError(403, 'AI settings can only be changed on the computer running CharBuild (or start it with ALLOW_REMOTE_SETTINGS=1).');
     }
-    const { apiKey, model, effort, clearKey } = req.body || {};
-    const patch = {};
-    if (clearKey) patch.apiKey = null;
-    else if (typeof apiKey === 'string' && apiKey.trim()) patch.apiKey = apiKey.trim();
-    if (typeof model === 'string') patch.model = model.trim() || null;
-    if (typeof effort === 'string') patch.effort = effort || null;
-    await store.saveSettings(patch);
+    await ai.updateSettings(req.body || {});
     res.json(aiStatus(req));
   }));
 
@@ -124,9 +119,18 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   // AI
   app.post('/api/ai/test', wrap(async (req, res) => {
     try {
-      res.json(await ai.test());
+      res.json(await ai.test(req.body?.provider));
     } catch (err) {
+      if (err.status === 400 && !isApiError(err)) throw err;
       res.status(200).json({ ok: false, error: friendlyError(err) });
+    }
+  }));
+  app.get('/api/ai/models', wrap(async (req, res) => {
+    try {
+      res.json({ models: await ai.listModels(req.query.provider) });
+    } catch (err) {
+      if (err.status === 400 && !isApiError(err)) throw err;
+      res.status(502).json({ error: friendlyError(err) });
     }
   }));
 
@@ -193,14 +197,29 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   return { app, store, ai };
 }
 
+const isApiError = (err) => err instanceof Anthropic.APIError || err instanceof OpenAI.APIError;
+
+// Turn SDK errors from any provider into a message a writer can act on.
 function friendlyError(err) {
-  if (err instanceof Anthropic.AuthenticationError) return 'Claude rejected the credentials. Add a valid API key in AI settings (or set ANTHROPIC_API_KEY) and try again.';
-  if (err instanceof Anthropic.PermissionDeniedError) return 'This API key is not allowed to use the selected model.';
-  if (err instanceof Anthropic.NotFoundError) return 'Model not found. Check the model name in AI settings.';
-  if (err instanceof Anthropic.RateLimitError) return 'Rate limited by the Claude API. Wait a moment and try again.';
-  if (err instanceof Anthropic.APIConnectionError) return 'Could not reach the Claude API. Check your network connection.';
-  if (err instanceof Anthropic.APIError) return `Claude API error${err.status ? ` ${err.status}` : ''}: ${err.message}`;
-  if (/api key|apiKey|authentication|credentials/i.test(err?.message || '')) return 'No Claude credentials found. Add an API key in AI settings or set ANTHROPIC_API_KEY.';
+  const cfg = err?.provider;
+  const who = cfg?.label || 'The AI provider';
+  const connection = err instanceof Anthropic.APIConnectionError || err instanceof OpenAI.APIConnectionError || /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed/i.test(err?.message || '');
+  if (connection) {
+    return `Could not reach ${who}${cfg?.baseURL ? ` at ${cfg.baseURL}` : ''}. ${cfg?.group === 'local' ? 'Is it running on the computer that hosts CharBuild?' : 'Check the network connection.'}`;
+  }
+  if (isApiError(err)) {
+    switch (err.status) {
+      case 401: return `${who} rejected the API key. Check it in the coach settings.`;
+      case 403: return `${who} refused access${cfg?.model ? ` to “${cfg.model}”` : ''} with this key.`;
+      case 404: return `${who} couldn’t find${cfg?.model ? ` model “${cfg.model}”` : ' that model'}. Pick another one with Load models in the coach settings.`;
+      case 429: return `${who} is rate-limiting this key (or its quota is used up). Wait a moment and try again.`;
+      default: return `${who} error${err.status ? ` ${err.status}` : ''}: ${err.message}`;
+    }
+  }
+  if (err?.status && !isApiError(err)) return err.message; // our own, already phrased for the writer
+  if (/Could not resolve authentication|api key|apiKey|credentials/i.test(err?.message || '')) {
+    return `No API key found for ${who}. Add one in the coach settings or set ${cfg?.envPrefix || 'ANTHROPIC'}_API_KEY.`;
+  }
   return err?.message || 'Something went wrong.';
 }
 
@@ -225,7 +244,7 @@ if (isMain) {
     } else {
       console.log(`  Bound to ${host} only${host === '127.0.0.1' || host === 'localhost' ? ' — not reachable from other devices' : ''}`);
     }
-    console.log(`\n  AI coach: ${st.configured ? `on (${st.model}, key from ${st.source})` : 'off — add a key in the app’s AI settings or set ANTHROPIC_API_KEY'}`);
+    console.log(`\n  AI coach: ${st.configured ? `${st.providerLabel} — ${st.model || 'first available model'} (key: ${st.source})` : `off — choose a provider and add its key in the app’s coach settings (now: ${st.providerLabel})`}`);
     console.log(`  Book search: ${st.book.available ? `${st.book.passages} passages from docs/${st.book.file}` : st.book.reason}\n`);
   });
   server.on('error', (err) => {
