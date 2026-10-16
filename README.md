@@ -187,6 +187,20 @@ Implementation notes:
 
 Without a key, everything except the Coach and Interview tabs works.
 
+## Themes
+
+The theme menu in the top-right corner, next to the language menu, has three
+looks:
+* **Light** and **Dark**, the editorial originals.
+* **Terminal**: minimal, monospace, near-black and colour-coded like syntax
+  highlighting. Every station, part, conflict level and McKee check keeps its
+  own hue; labels read as keys, hints as `// comments` and numbers in orange.
+
+The choice is remembered in the browser. The first visit follows the system's
+light or dark setting, and printing always uses a white page.
+
+![The builder in the Terminal theme](docs/screenshots/terminal.png)
+
 ## Languages
 
 CharBuild speaks **English** and **Italian**. The globe menu in the top-right

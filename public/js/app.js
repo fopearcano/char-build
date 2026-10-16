@@ -46,6 +46,22 @@ async function applyLocale(id) {
   document.documentElement.lang = id;
 }
 
+// ── Theme ────────────────────────────────────────────────────────────────
+const THEME_KEY = 'charbuild-theme';
+const THEMES = [
+  { id: 'light', icon: 'sun', label: () => t('Light') },
+  { id: 'dark', icon: 'moon', label: () => t('Dark') },
+  { id: 'terminal', icon: 'terminal', label: () => t('Terminal') },
+];
+const currentTheme = () => THEMES.find((x) => x.id === document.documentElement.dataset.theme) || THEMES[0];
+function applyTheme(id, { save = false } = {}) {
+  const th = THEMES.find((x) => x.id === id) || THEMES[0];
+  document.documentElement.dataset.theme = th.id;
+  if (save) {
+    try { localStorage.setItem(THEME_KEY, th.id); } catch { /* storage unavailable */ }
+  }
+}
+
 const state = {
   stories: [],
   characters: [],
@@ -335,29 +351,56 @@ function topbar() {
       <span id="save-status" class="save-status" data-state="saved" aria-live="polite"></span>
       ${c ? `<a class="btn ghost sm ${r.view === 'profile' ? 'active' : ''}" href="#/char/${attr(c.id)}/profile">${icon('chart')}<span>${esc(t('Profile'))}</span></a>` : ''}
       <button class="btn sm coach-btn ${aiOn ? 'on' : ''}" data-action="toggle-assistant" title="${attr(t('AI coach (optional)'))}">${icon('sparkle')}<span>${esc(t('Coach'))}</span></button>
-      <button class="icon-btn" data-action="toggle-theme" aria-label="${attr(t('Toggle dark mode'))}" title="${attr(t('Toggle dark mode'))}">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>
+      ${themeMenu()}
       ${langMenu()}
     </div>
   </header>`;
 }
 
-// Top-right language switcher: a button that opens a small menu.
-function langMenu() {
-  const cur = LOCALES.find((l) => l.id === getLocale()) || LOCALES[0];
-  return `<div class="lang-menu">
-    <button class="btn ghost sm lang-btn" data-action="toggle-lang" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-pop" title="${attr(t('Language'))}" aria-label="${attr(t('Language: {name}', { name: cur.label }))}">${icon('globe')}<span>${esc(cur.short)}</span>${icon('chevronDown', 'caret')}</button>
-    <div class="lang-pop" id="lang-pop" role="menu" hidden>${LOCALES.map((l) => `<button role="menuitemradio" aria-checked="${l.id === cur.id}" class="lang-opt ${l.id === cur.id ? 'on' : ''}" data-action="set-lang" data-lang="${attr(l.id)}" lang="${attr(l.id)}"><span class="lang-code">${esc(l.short)}</span><span>${esc(l.label)}</span>${l.id === cur.id ? icon('check') : ''}</button>`).join('')}</div>
+// ── Top-bar menus (theme, language) ──────────────────────────────────────
+// A button that opens a small menu of options; one menu is open at a time.
+function dropdown({ name, title, label, lead, short = '', items }) {
+  return `<div class="dd" data-dd="${name}">
+    <button class="btn ghost sm dd-btn ${name}-btn" data-action="toggle-dd" data-dd="${name}" aria-haspopup="menu" aria-expanded="false" aria-controls="${name}-pop" title="${attr(title)}" aria-label="${attr(label)}">${lead}${short ? `<span>${esc(short)}</span>` : ''}${icon('chevronDown', 'caret')}</button>
+    <div class="dd-pop" id="${name}-pop" role="menu" hidden>${items.join('')}</div>
   </div>`;
 }
 
-function setLangMenu(open) {
-  const pop = document.getElementById('lang-pop');
-  const btn = document.querySelector('.lang-btn');
-  if (!pop || !btn) return;
-  pop.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-  if (open) (pop.querySelector('.lang-opt.on') || pop.querySelector('.lang-opt'))?.focus();
+const ddOption = ({ name, on, lead, label, attrs }) => `<button role="menuitemradio" aria-checked="${on}" class="dd-opt ${name}-opt ${on ? 'on' : ''}" data-action="set-${name}" ${attrs}>${lead}<span>${esc(label)}</span>${on ? icon('check') : ''}</button>`;
+
+function langMenu() {
+  const cur = LOCALES.find((l) => l.id === getLocale()) || LOCALES[0];
+  return dropdown({
+    name: 'lang',
+    title: t('Language'),
+    label: t('Language: {name}', { name: cur.label }),
+    lead: icon('globe'),
+    short: cur.short,
+    items: LOCALES.map((l) => ddOption({ name: 'lang', on: l.id === cur.id, lead: `<span class="dd-code">${esc(l.short)}</span>`, label: l.label, attrs: `data-lang="${attr(l.id)}" lang="${attr(l.id)}"` })),
+  });
 }
+
+function themeMenu() {
+  const cur = currentTheme();
+  return dropdown({
+    name: 'theme',
+    title: t('Theme'),
+    label: t('Theme: {name}', { name: cur.label() }),
+    lead: icon(cur.icon),
+    items: THEMES.map((th) => ddOption({ name: 'theme', on: th.id === cur.id, lead: `<span class="dd-swatch" data-swatch="${th.id}" aria-hidden="true"><i></i><i></i><i></i></span>`, label: th.label(), attrs: `data-theme-id="${th.id}"` })),
+  });
+}
+
+function setMenu(name, open) {
+  for (const dd of document.querySelectorAll('.dd')) {
+    const on = open && dd.dataset.dd === name;
+    const pop = dd.querySelector('.dd-pop');
+    pop.hidden = !on;
+    dd.querySelector('.dd-btn').setAttribute('aria-expanded', String(on));
+    if (on) (pop.querySelector('.dd-opt.on') || pop.querySelector('.dd-opt'))?.focus();
+  }
+}
+const closeMenus = () => setMenu(null, false);
 
 function logoSvg() {
   return `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="2.2" opacity=".35"/><circle cx="16" cy="16" r="9" fill="none" stroke="currentColor" stroke-width="2.2" opacity=".65"/><path d="M16 2v28" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="16" r="4" fill="currentColor"/></svg>`;
@@ -789,17 +832,17 @@ app.addEventListener('click', async (e) => {
 
 // Close the language menu on outside click or Escape.
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.lang-menu')) setLangMenu(false);
+  if (!e.target.closest('.dd')) closeMenus();
 });
 document.addEventListener('keydown', (e) => {
-  const pop = document.getElementById('lang-pop');
-  if (!pop || pop.hidden) return;
+  const pop = document.querySelector('.dd-pop:not([hidden])');
+  if (!pop) return;
   if (e.key === 'Escape') {
-    setLangMenu(false);
-    document.querySelector('.lang-btn')?.focus();
+    closeMenus();
+    pop.closest('.dd').querySelector('.dd-btn')?.focus();
   } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    const opts = [...pop.querySelectorAll('.lang-opt')];
+    const opts = [...pop.querySelectorAll('.dd-opt')];
     const i = opts.indexOf(document.activeElement);
     opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]?.focus();
   }
@@ -814,11 +857,13 @@ app.addEventListener('keydown', (e) => {
 });
 
 const ACTIONS = {
-  'toggle-theme': () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem('charbuild-theme', next); } catch { /* storage unavailable */ }
+  'toggle-dd': (el) => setMenu(el.dataset.dd, el.getAttribute('aria-expanded') !== 'true'),
+  'set-theme': (el) => {
+    closeMenus();
+    applyTheme(el.dataset.themeId, { save: true });
     render();
+    assistant.render();
+    document.querySelector('.theme-btn')?.focus();
   },
   'toggle-assistant': () => assistant.toggle(),
   ask: (el) => {
@@ -1006,9 +1051,8 @@ const ACTIONS = {
     toast(t('Sample story “{title}” restored', { title: storyById(SAMPLE_ID)?.title || '' }), 'success', 8000, undoAction(res));
     render();
   },
-  'toggle-lang': (el) => setLangMenu(el.getAttribute('aria-expanded') !== 'true'),
   'set-lang': async (el) => {
-    setLangMenu(false);
+    closeMenus();
     const id = el.dataset.lang;
     if (id === getLocale()) return;
     try { localStorage.setItem(LANG_KEY, id); } catch { /* storage unavailable */ }
@@ -1108,9 +1152,8 @@ async function load() {
 
 (async function boot() {
   try {
-    const saved = localStorage.getItem('charbuild-theme');
-    if (saved) document.documentElement.dataset.theme = saved;
-    else if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+    const saved = localStorage.getItem(THEME_KEY);
+    applyTheme(THEMES.some((x) => x.id === saved) ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   } catch { /* storage unavailable */ }
   try {
     await applyLocale(preferredLocale());
