@@ -174,9 +174,10 @@ export class Store {
     return s;
   }
 
-  async updateStory(id, body) {
+  // `checkFresh`: refuse a save based on an outdated copy (see checkFresh).
+  async updateStory(id, body, { checkFresh = false } = {}) {
     const cur = this.getStory(id);
-    this.checkFresh(cur, body, 'story');
+    if (checkFresh) this.checkFresh(cur, body, 'story');
     const next = normalizeStory({ ...sanitize(body), id: cur.id, createdAt: cur.createdAt, updatedAt: new Date().toISOString() });
     Object.assign(cur, next);
     await this.flush();
@@ -213,9 +214,9 @@ export class Store {
     return c;
   }
 
-  async updateCharacter(id, body) {
+  async updateCharacter(id, body, { checkFresh = false } = {}) {
     const cur = this.getCharacter(id);
-    this.checkFresh(cur, body, 'character');
+    if (checkFresh) this.checkFresh(cur, body, 'character');
     const clean = sanitize(body);
     if (clean.storyId && clean.storyId !== cur.storyId) this.getStory(clean.storyId);
     const next = normalizeCharacter({ ...clean, id: cur.id, createdAt: cur.createdAt, updatedAt: new Date().toISOString() });

@@ -59,9 +59,10 @@ const state = {
 export async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: { 'X-CharBuild-Lang': getLocale(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { 'X-CharBuild-Lang': getLocale(), 'X-CharBuild-Api': String(CLIENT_API), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
+  noticeBuild(res.headers.get('X-CharBuild-Build'));
   const text = await res.text();
   let data = null;
   try {
@@ -71,6 +72,24 @@ export async function api(method, url, body) {
   }
   if (!res.ok) throw Object.assign(new Error(data?.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
+}
+
+// The server was updated while this page stayed open: offer a reload, so
+// the page and the server match again.
+let updateNoticed = false;
+function noticeBuild(build) {
+  if (!build) return;
+  if (!state.build) state.build = build;
+  else if (build !== state.build && !updateNoticed) {
+    updateNoticed = true;
+    toast(t('CharBuild has been updated. Reload the page to use the new version.'), 'warn', 10 * 60 * 1000, {
+      label: t('Reload'),
+      onClick: async () => {
+        await flushSaves();
+        location.reload();
+      },
+    });
+  }
 }
 
 const charById = (id) => state.characters.find((c) => c.id === id);
@@ -175,6 +194,51 @@ async function askConflict(kind, local, current) {
   }
   // Dismissed: nothing is saved until the next edit asks again.
 }
+
+// Coming back to this tab: take what other tabs or devices saved meanwhile,
+// for every story and character with no unsaved edits here. Edits made here
+// afterwards then start from the latest version instead of conflicting.
+let lastSync = 0;
+async function syncFromServer() {
+  if (Date.now() - lastSync < 2000 || document.querySelector('.modal-backdrop')) return;
+  lastSync = Date.now();
+  let data;
+  try {
+    data = await api('GET', '/api/bootstrap');
+  } catch {
+    return;
+  }
+  const busy = (key) => saveTimers.has(key) || inflight.has(key) || conflicted.has(key);
+  let changed = false;
+  const merge = (kind, local, remote) => {
+    const fresh = new Map(remote.map((x) => [x.id, x]));
+    const out = [];
+    for (const item of local) {
+      const r = fresh.get(item.id);
+      fresh.delete(item.id);
+      if (busy(`${kind}:${item.id}`)) out.push(item);
+      else if (!r) changed = true; // deleted elsewhere
+      else if (r.updatedAt !== item.updatedAt) {
+        out.push(r);
+        changed = true;
+      } else out.push(item);
+    }
+    for (const r of fresh.values()) {
+      out.push(r);
+      changed = true;
+    }
+    return out;
+  };
+  state.stories = merge('story', state.stories, data.stories);
+  state.characters = merge('char', state.characters, data.characters);
+  if (!changed) return;
+  if (state.route.view === 'builder') rerenderStation(); // keeps the cursor where it is
+  else render();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncFromServer();
+});
+window.addEventListener('focus', () => syncFromServer());
 
 async function flushSaves() {
   const keys = [...saveTimers.keys()];

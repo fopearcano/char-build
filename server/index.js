@@ -25,6 +25,8 @@ export const ROOT = path.resolve(here, '..');
 // the API level the browser app expects. Shown in the library footer and the
 // startup banner, so an out-of-date server is easy to spot.
 export const API_LEVEL = 2;
+// Changes whenever the server is updated; pages compare it to notice that.
+export const BUILD = () => `${VERSION.version}+${VERSION.commit || 'local'}`;
 export const VERSION = (() => {
   const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
   try {
@@ -60,6 +62,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   // gets the writer's interface language for messages it returns.
   app.use((req, res, next) => {
     req.lang = requestLang(req);
+    if (req.path.startsWith('/api/')) res.setHeader('X-CharBuild-Build', BUILD());
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -87,14 +90,18 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   app.get('/api/stories', (req, res) => res.json(store.listStories()));
   app.post('/api/stories', wrap(async (req, res) => res.status(201).json(await store.createStory(req.body))));
   app.get('/api/stories/:id', (req, res) => res.json(store.getStory(idParam(req))));
-  app.put('/api/stories/:id', wrap(async (req, res) => res.json(await store.updateStory(idParam(req), req.body))));
+  // Pages that handle "changed elsewhere" say so (X-CharBuild-Api ≥ 2) and get
+  // saves based on an outdated copy refused. A page left open from before an
+  // update keeps last-write-wins instead of failing every save.
+  const checkFresh = (req) => Number(req.get('x-charbuild-api')) >= API_LEVEL;
+  app.put('/api/stories/:id', wrap(async (req, res) => res.json(await store.updateStory(idParam(req), req.body, { checkFresh: checkFresh(req) }))));
   app.delete('/api/stories/:id', wrap(async (req, res) => res.json(await store.deleteStory(idParam(req)))));
 
   // Characters
   app.get('/api/characters', (req, res) => res.json(store.listCharacters(req.query.storyId)));
   app.post('/api/characters', wrap(async (req, res) => res.status(201).json(await store.createCharacter(req.body))));
   app.get('/api/characters/:id', (req, res) => res.json(store.getCharacter(idParam(req))));
-  app.put('/api/characters/:id', wrap(async (req, res) => res.json(await store.updateCharacter(idParam(req), req.body))));
+  app.put('/api/characters/:id', wrap(async (req, res) => res.json(await store.updateCharacter(idParam(req), req.body, { checkFresh: checkFresh(req) }))));
   app.patch('/api/characters/:id', wrap(async (req, res) => res.json(await store.patchCharacter(idParam(req), req.body?.updates))));
   app.delete('/api/characters/:id', wrap(async (req, res) => res.json(await store.deleteCharacter(idParam(req)))));
   app.post('/api/characters/:id/duplicate', wrap(async (req, res) => res.status(201).json(await store.duplicateCharacter(idParam(req), req.lang))));

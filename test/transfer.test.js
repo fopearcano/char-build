@@ -15,8 +15,8 @@ async function start(opts = {}) {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const req = async (method, url, body) => {
-    const res = await fetch(base + url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const req = async (method, url, body, headers = {}) => {
+    const res = await fetch(base + url, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch { /* not json */ }
@@ -231,20 +231,33 @@ test('a corrupt library file is set aside and the newest backup is loaded', asyn
 test('stale saves are refused with the current version (409)', async (t) => {
   const s = await start();
   t.after(s.close);
+  const page = { 'X-CharBuild-Api': '2' }; // what the current app sends
   const mara = (await s.req('GET', '/api/characters/char_mara')).json;
-  const first = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device A' });
+  const first = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device A' }, page);
   assert.equal(first.status, 200);
-  const stale = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device B' });
+  assert.match(first.headers.get('x-charbuild-build'), /^\d+\.\d+\.\d+\+/);
+  const stale = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device B' }, page);
   assert.equal(stale.status, 409);
   assert.equal(stale.json.conflict, true);
   assert.equal(stale.json.current.name, 'Device A');
   // Keeping "mine" = saving on top of the current version.
-  const mine = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device B', updatedAt: stale.json.current.updatedAt });
+  const mine = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Device B', updatedAt: stale.json.current.updatedAt }, page);
   assert.equal(mine.status, 200);
   assert.equal(mine.json.name, 'Device B');
   const story = (await s.req('GET', '/api/stories/story_undertow')).json;
-  await s.req('PUT', '/api/stories/story_undertow', { ...story, title: 'A' });
-  assert.equal((await s.req('PUT', '/api/stories/story_undertow', { ...story, title: 'B' })).status, 409);
+  await s.req('PUT', '/api/stories/story_undertow', { ...story, title: 'A' }, page);
+  assert.equal((await s.req('PUT', '/api/stories/story_undertow', { ...story, title: 'B' }, page)).status, 409);
+});
+
+test('a page open from before an update keeps saving (last write wins)', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const mara = (await s.req('GET', '/api/characters/char_mara')).json;
+  await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Newer tab' }, { 'X-CharBuild-Api': '2' });
+  // An older page doesn't send X-CharBuild-Api and can't handle a 409.
+  const old = await s.req('PUT', '/api/characters/char_mara', { ...mara, name: 'Old tab' });
+  assert.equal(old.status, 200);
+  assert.equal(old.json.name, 'Old tab');
 });
 
 test('a failed disk write is reported instead of claiming success', async (t) => {

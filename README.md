@@ -236,8 +236,12 @@ Everything is stored on the computer running the server, in `data/` (or `DATA_DI
   then renamed.
 * If the disk write fails, the app says so ("Could not save…") and retries.
   It never shows "All changes saved" for a save that didn't happen.
-* If the same story or character is edited on two devices or in two tabs, the
-  later save is refused, and you choose which version to keep.
+* Working in two tabs or on two devices: when you come back to a tab, it picks
+  up what was saved elsewhere. If both edit the same story or character at the
+  same time, the later save is refused, and you choose which version to keep.
+* After an update, pages still open from the old version keep saving
+  normally. The page offers **Reload** as soon as it notices that the server
+  has been updated.
 * Coach conversations are kept in `data/chats/`, and AI settings in
   `data/settings.json`.
 
