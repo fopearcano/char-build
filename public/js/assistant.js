@@ -156,7 +156,10 @@ export class Assistant {
     if (!c) return '<div class="as-empty"><p>Open a character in the builder to get coaching or to interview her.</p></div>';
     const chat = this.chats[mode];
     const history = this.histories[mode];
-    const setup = ai.configured ? '' : `<div class="as-setup">${icon('info')}<div><b>AI is optional and not configured.</b><p>Add an Anthropic API key in <button class="link" data-as="tab" data-tab="settings">settings</button> (or set <code>ANTHROPIC_API_KEY</code> before <code>npm start</code>). Everything else in CharBuild works without it.</p></div></div>`;
+    const setupHow = ai.canEditSettings === false
+      ? 'Add an Anthropic API key in the coach settings <b>on the computer running CharBuild</b> (or set <code>ANTHROPIC_API_KEY</code> there before <code>npm start</code>).'
+      : 'Add an Anthropic API key in <button class="link" data-as="tab" data-tab="settings">settings</button> (or set <code>ANTHROPIC_API_KEY</code> before <code>npm start</code>).';
+    const setup = ai.configured ? '' : `<div class="as-setup">${icon('info')}<div><b>AI is optional and not configured.</b><p>${setupHow} Everything else in CharBuild works without it.</p></div></div>`;
     const intro = mode === 'coach'
       ? `<div class="as-intro"><p>Ask anything about building <b>${esc(displayName(c))}</b>. The coach reads the live profile, searches McKee’s book, runs the diagnostics and proposes field values you can apply with one click.</p></div>`
       : `<div class="as-intro"><p><b>${esc(displayName(c))}</b> sits across from you. McKee’s self-story exercise: ask about high points, low points, dilemmas and beliefs — then judge truth from self-serving spin (Ch. 4). Write in [brackets] to step out of the scene.</p></div>`;
@@ -242,13 +245,16 @@ export class Assistant {
   }
 
   settingsHtml(ai) {
+    const locked = ai.canEditSettings === false;
+    const dis = locked ? 'disabled' : '';
     return `<div class="as-settings">
       <div class="status-row ${ai.configured ? 'ok' : ''}">${icon(ai.configured ? 'check' : 'info')}<div><b>${ai.configured ? 'AI configured' : 'AI not configured'}</b><small>${ai.configured ? `Key from ${esc(ai.source)}${ai.keyHint ? ` (${esc(ai.keyHint)})` : ''}` : 'CharBuild works fully without AI.'}</small></div></div>
-      <label class="field"><span class="lbl">Anthropic API key</span><input class="inp" type="password" id="as-key" placeholder="${ai.source === 'settings' ? 'Saved — enter a new key to replace' : 'sk-ant-…'}" autocomplete="off"></label>
-      <p class="help">Stored on this machine in <code>data/settings.json</code>; never sent back to the browser. Alternatively set <code>ANTHROPIC_API_KEY</code>.</p>
-      <label class="field"><span class="lbl">Model</span><input class="inp" id="as-model" value="${attr(ai.model || '')}" placeholder="claude-opus-5-5"></label>
-      <label class="field"><span class="lbl">Effort</span><select class="inp" id="as-effort">${['low', 'medium', 'high', 'xhigh'].map((e) => `<option ${ai.effort === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>
-      <div class="row-btns"><button class="btn primary sm" data-as="save-settings">Save</button><button class="btn sm" data-as="test">Test connection</button>${ai.source === 'settings' ? '<button class="btn ghost sm" data-as="clear-key">Remove saved key</button>' : ''}</div>
+      ${locked ? `<div class="as-setup">${icon('info')}<div><b>Read-only on this device.</b><p>You’re connected over the network. The API key, model and effort can only be changed on the computer running CharBuild (or start it with <code>ALLOW_REMOTE_SETTINGS=1</code>).</p></div></div>` : ''}
+      <label class="field"><span class="lbl">Anthropic API key</span><input class="inp" type="password" id="as-key" placeholder="${ai.source === 'settings' ? 'Saved — enter a new key to replace' : 'sk-ant-…'}" autocomplete="off" ${dis}></label>
+      <p class="help">Stored on the host in <code>data/settings.json</code>; never sent back to the browser. Alternatively set <code>ANTHROPIC_API_KEY</code>.</p>
+      <label class="field"><span class="lbl">Model</span><input class="inp" id="as-model" value="${attr(ai.model || '')}" placeholder="claude-opus-5-5" ${dis}></label>
+      <label class="field"><span class="lbl">Effort</span><select class="inp" id="as-effort" ${dis}>${['low', 'medium', 'high', 'xhigh'].map((e) => `<option ${ai.effort === e ? 'selected' : ''}>${e}</option>`).join('')}</select></label>
+      <div class="row-btns">${locked ? '' : '<button class="btn primary sm" data-as="save-settings">Save</button>'}<button class="btn sm" data-as="test">Test connection</button>${ai.source === 'settings' && !locked ? '<button class="btn ghost sm" data-as="clear-key">Remove saved key</button>' : ''}</div>
       <p id="as-test" class="help"></p>
       <p class="help">Book search: ${ai.book?.available ? `${ai.book.passages} passages indexed from <code>${esc(ai.book.file)}</code>.` : esc(ai.book?.reason || 'unavailable')}</p>
     </div>`;

@@ -1,6 +1,7 @@
 // CharBuild server: REST API + static SPA on port 4133.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -15,7 +16,20 @@ import { displayName } from '../shared/model.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '..');
 
-export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ROOT, 'data'), seed = true, makeClient, rootDir = ROOT } = {}) {
+// Requests from the machine running the server (not from other LAN devices).
+export function isLoopback(req) {
+  const a = req.socket?.remoteAddress || '';
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+
+// IPv4 addresses other devices on the network can use to reach this host.
+export function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+}
+
+export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ROOT, 'data'), seed = true, makeClient, rootDir = ROOT, allowRemoteSettings = process.env.ALLOW_REMOTE_SETTINGS === '1' } = {}) {
   const store = await new Store(dataDir).init({ seed: seed ? sampleData : null });
   const ai = createAI({ store, rootDir, makeClient });
   const app = express();
@@ -38,8 +52,13 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+  // The app is reachable from the whole LAN, so only the host machine may
+  // change the API key / model (unless ALLOW_REMOTE_SETTINGS=1).
+  const canEditSettings = (req) => allowRemoteSettings || isLoopback(req);
+  const aiStatus = (req) => ({ ...ai.status(), canEditSettings: canEditSettings(req) });
+
   app.get('/api/bootstrap', (req, res) => {
-    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: ai.status() });
+    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req) });
   });
 
   // Stories
@@ -79,8 +98,11 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   }));
 
   // Settings (API key is write-only; only a hint is ever returned)
-  app.get('/api/settings', (req, res) => res.json(ai.status()));
+  app.get('/api/settings', (req, res) => res.json(aiStatus(req)));
   app.put('/api/settings', wrap(async (req, res) => {
+    if (!canEditSettings(req)) {
+      throw new HttpError(403, 'AI settings can only be changed on the computer running CharBuild (or start it with ALLOW_REMOTE_SETTINGS=1).');
+    }
     const { apiKey, model, effort, clearKey } = req.body || {};
     const patch = {};
     if (clearKey) patch.apiKey = null;
@@ -88,7 +110,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
     if (typeof model === 'string') patch.model = model.trim() || null;
     if (typeof effort === 'string') patch.effort = effort || null;
     await store.saveSettings(patch);
-    res.json(ai.status());
+    res.json(aiStatus(req));
   }));
 
   // Book
@@ -187,13 +209,29 @@ if (isMain) {
   const envFile = path.join(ROOT, '.env');
   if (fs.existsSync(envFile) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envFile);
   const port = Number(process.env.PORT) || 4133;
-  const host = process.env.HOST || '127.0.0.1';
+  // Listen on all interfaces so phones, tablets and other computers on the
+  // LAN can open the app. Set HOST=127.0.0.1 to keep it private to this machine.
+  const host = process.env.HOST || '0.0.0.0';
   const { app, ai } = await createApp();
-  app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     const st = ai.status();
-    console.log(`\n  CharBuild — character builder after McKee's CHARACTER`);
-    console.log(`  → http://${host === '0.0.0.0' ? 'localhost' : host}:${port}\n`);
-    console.log(`  AI coach: ${st.configured ? `on (${st.model}, key from ${st.source})` : 'off — add a key in the app’s AI settings or set ANTHROPIC_API_KEY'}`);
+    const everywhere = host === '0.0.0.0' || host === '::';
+    console.log(`\n  CharBuild — character builder after McKee's CHARACTER\n`);
+    console.log(`  Local:    http://localhost:${port}`);
+    if (everywhere) {
+      const lan = lanAddresses();
+      for (const ip of lan) console.log(`  Network:  http://${ip}:${port}`);
+      if (!lan.length) console.log('  Network:  no LAN interface found');
+    } else {
+      console.log(`  Bound to ${host} only${host === '127.0.0.1' || host === 'localhost' ? ' — not reachable from other devices' : ''}`);
+    }
+    console.log(`\n  AI coach: ${st.configured ? `on (${st.model}, key from ${st.source})` : 'off — add a key in the app’s AI settings or set ANTHROPIC_API_KEY'}`);
     console.log(`  Book search: ${st.book.available ? `${st.book.passages} passages from docs/${st.book.file}` : st.book.reason}\n`);
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') console.error(`\n  Port ${port} is already in use. Stop the other process or set PORT=… and try again.\n`);
+    else if (err.code === 'EACCES') console.error(`\n  Not allowed to listen on ${host}:${port}.\n`);
+    else console.error(err);
+    process.exit(1);
   });
 }

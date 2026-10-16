@@ -18,6 +18,18 @@ npm install
 npm start            # → http://localhost:4133
 ```
 
+The server listens on every network interface. When it starts, it prints a
+`Network:` address such as `http://192.168.1.20:4133`, and any phone,
+tablet or computer on the same LAN can open that address.
+
+If another device can't connect, allow incoming connections on port 4133 in
+the host's firewall. On Windows, accept the prompt that asks whether to let
+Node.js through, or add an inbound rule for TCP port 4133. On macOS, allow
+`node` under System Settings → Network → Firewall.
+
+To keep the app private to the host machine, start it with
+`HOST=127.0.0.1 npm start`.
+
 You need Node 20.12 or later (it was tested on Node 22). On first run the app
 creates a sample story, *Undertow*, with a cast of six, so every chart has
 data to show. Delete the story whenever you like, or restore it from the
@@ -110,6 +122,10 @@ Implementation notes:
   than by editing earlier context. Chats are saved in `data/chats/`.
 * The API key is stored only on your machine, in `data/settings.json`, and
   the server never sends it back to the browser.
+* **On a LAN:** every device on the network can use the coach, and the coach
+  uses the host's key. Only the host machine can change the key, model or
+  effort. To allow changes from other devices too, start the server with
+  `ALLOW_REMOTE_SETTINGS=1`.
 
 Without a key, everything except the Coach and Interview tabs works.
 
@@ -133,7 +149,8 @@ guidance is paraphrased, with chapter references. You can point
 | Variable | Default | |
 |----------|---------|-|
 | `PORT` | `4133` | |
-| `HOST` | `127.0.0.1` | Use `0.0.0.0` to reach the app from another machine or a container. Anyone who can reach it can use your AI key. |
+| `HOST` | `0.0.0.0` | All interfaces, so the app is reachable on the LAN. Use `127.0.0.1` to make it local-only. |
+| `ALLOW_REMOTE_SETTINGS` | — | Set to `1` to let other devices change the AI key, model and effort. |
 | `DATA_DIR` | `./data` | |
 | `ANTHROPIC_API_KEY` | — | Optional. You can also set it in the app. |
 | `ANTHROPIC_MODEL` | `claude-opus-5-5` | The model chosen in the app’s settings takes precedence. |

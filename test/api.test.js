@@ -203,3 +203,38 @@ test('chat input validation', async (t) => {
   const test1 = (await s.req('POST', '/api/ai/test')).json;
   assert.equal(test1.ok, true);
 });
+
+test('reachable over the LAN; AI settings stay host-only', async (t) => {
+  const { lanAddresses } = await import('../server/index.js');
+  const ip = lanAddresses()[0];
+  if (!ip) return t.skip('no LAN interface');
+  const listen = async (opts) => {
+    const { app } = await createApp({ dataDir: tmpDir(), ...opts });
+    const server = await new Promise((resolve) => {
+      const s = app.listen(0, '0.0.0.0', () => resolve(s));
+    });
+    t.after(() => new Promise((r) => server.close(r)));
+    return server.address().port;
+  };
+  const port = await listen({});
+  const lan = `http://${ip}:${port}`;
+  const local = `http://127.0.0.1:${port}`;
+
+  const page = await fetch(`${lan}/`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /<div id="app">/);
+  const boot = await (await fetch(`${lan}/api/bootstrap`)).json();
+  assert.equal(boot.characters.length, 6);
+  assert.equal(boot.ai.canEditSettings, false);
+  assert.equal((await (await fetch(`${local}/api/settings`)).json()).canEditSettings, true);
+
+  const put = (base) => fetch(`${base}/api/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: 'sk-ant-lan-test-000000' }) });
+  assert.equal((await put(lan)).status, 403);
+  assert.equal((await put(local)).status, 200);
+  // editing characters from another device works
+  const patch = await fetch(`${lan}/api/characters/char_mara`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates: [{ path: 'concept.nickname', value: 'Set from a tablet' }] }) });
+  assert.equal((await patch.json()).concept.nickname, 'Set from a tablet');
+
+  const open = await listen({ allowRemoteSettings: true });
+  assert.equal((await put(`http://${ip}:${open}`)).status, 200);
+});
