@@ -45,6 +45,20 @@ tab, choose a provider and paste its API key. You can also put the key in the
 environment or in a `.env` file before you run `npm start` (see
 `.env.example`), for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
+### Updating
+
+```bash
+git pull                 # on the branch you run from
+npm install              # in case dependencies changed
+# stop the running server (Ctrl+C in its terminal), then:
+npm start
+```
+
+The startup banner and the library footer show the running version
+(`CharBuild 1.4.0 · <commit>`). If the server is older than the page, for
+example after pulling without restarting it, the app says so. A port that's
+still taken by the old process gives "Port 4133 is already in use".
+
 ## The sixteen stations
 
 | # | Station | McKee | What you build |

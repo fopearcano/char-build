@@ -16,6 +16,8 @@ import { createTransfer } from './transfer.js';
 import { exportFileName } from '/shared/transfer.js';
 
 const SAMPLE_ID = 'story_undertow';
+// The server API level this page needs (see API_LEVEL in server/index.js).
+const CLIENT_API = 2;
 const LANG_KEY = 'charbuild-lang';
 
 // ── Language ─────────────────────────────────────────────────────────────
@@ -334,7 +336,8 @@ function libraryView() {
     <h2 class="section-title">${esc(t('Stories'))}</h2>
     <div class="story-grid-lib">${storyCards || `<div class="card empty-state"><p>${esc(t('No stories yet.'))}</p><button class="btn primary" data-action="new-story">${icon('plus')} ${esc(t('Create your first story'))}</button></div>`}</div>
     ${loose.length ? `<h2 class="section-title">${esc(t('Characters without a story'))}</h2><div class="char-cards">${loose.map(charCard).join('')}</div>` : ''}
-    <footer class="credits">${tHtml('Framework after Robert McKee, {book} ({year}). Guidance is paraphrased with chapter references; book search uses your own copy in {docs}.', { book: `<i>${esc(K.BOOK.title)}</i>`, year: K.BOOK.year, docs: '<code>docs/</code>' })}</footer>
+    <footer class="credits">${tHtml('Framework after Robert McKee, {book} ({year}). Guidance is paraphrased with chapter references; book search uses your own copy in {docs}.', { book: `<i>${esc(K.BOOK.title)}</i>`, year: K.BOOK.year, docs: '<code>docs/</code>' })}
+      ${state.server ? `<span class="app-version">CharBuild ${esc(t('Version {version}', { version: state.server.version }))}${state.server.commit ? ` · <code>${esc(state.server.commit)}</code>` : ''}</span>` : ''}</footer>
   </main>`;
 }
 
@@ -1036,6 +1039,7 @@ async function load() {
   state.characters = data.characters;
   state.ai = data.ai;
   state.recovered = data.recovered || null;
+  state.server = data.server || null;
 }
 
 (async function boot() {
@@ -1060,6 +1064,10 @@ async function load() {
   window.addEventListener('hashchange', route);
   route();
   transfer.enableDrop();
+  // Updated files but the old server still running: its API is missing pieces.
+  if (!state.server || state.server.api < CLIENT_API) {
+    toast(t('The CharBuild server is older than this page: stop it and start it again ({cmd}) to finish updating.', { cmd: 'npm start' }), 'warn', 30000);
+  }
   // The library file couldn't be read when the server started.
   const rec = state.recovered;
   let seen = null;

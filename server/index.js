@@ -1,6 +1,7 @@
 // CharBuild server: REST API + static SPA on port 4133.
 
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,20 @@ import { exportFileName } from '../shared/transfer.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, '..');
+
+// Which build is running (package version + git commit, when available), and
+// the API level the browser app expects. Shown in the library footer and the
+// startup banner, so an out-of-date server is easy to spot.
+export const API_LEVEL = 2;
+export const VERSION = (() => {
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  try {
+    const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    return { version, commit: commit || null };
+  } catch {
+    return { version, commit: null };
+  }
+})();
 
 // Requests from the machine running the server (not from other LAN devices).
 export function isLoopback(req) {
@@ -57,7 +72,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
     return req.params.id;
   };
 
-  app.get('/api/health', (req, res) => res.json({ ok: true }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, ...VERSION, api: API_LEVEL }));
 
   // The app is reachable from the whole LAN, so only the host machine may
   // change the API key / model (unless ALLOW_REMOTE_SETTINGS=1).
@@ -65,7 +80,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(RO
   const aiStatus = (req) => ({ ...ai.status(req.lang), canEditSettings: canEditSettings(req) });
 
   app.get('/api/bootstrap', (req, res) => {
-    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req), recovered: store.recovered });
+    res.json({ stories: store.listStories(), characters: store.listCharacters(), ai: aiStatus(req), recovered: store.recovered, server: { ...VERSION, api: API_LEVEL } });
   });
 
   // Stories
@@ -271,7 +286,7 @@ if (isMain) {
   const server = app.listen(port, host, () => {
     const st = ai.status();
     const everywhere = host === '0.0.0.0' || host === '::';
-    console.log(`\n  CharBuild — character builder after McKee's CHARACTER\n`);
+    console.log(`\n  CharBuild ${VERSION.version}${VERSION.commit ? ` (${VERSION.commit})` : ''} — character builder after McKee's CHARACTER\n`);
     console.log(`  Local:    http://localhost:${port}`);
     if (everywhere) {
       const lan = lanAddresses();

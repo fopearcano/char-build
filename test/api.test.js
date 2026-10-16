@@ -31,6 +31,8 @@ test('seeds the sample and serves the SPA', async (t) => {
   assert.equal(boot.status, 200);
   assert.equal(boot.json.stories[0].id, 'story_undertow');
   assert.equal(boot.json.characters.length, 6);
+  assert.equal(boot.json.server.api, 2, 'the page can tell an out-of-date server');
+  assert.match(boot.json.server.version, /^\d+\.\d+\.\d+$/);
   assert.equal(boot.json.ai.configured, !!process.env.ANTHROPIC_API_KEY);
   const html = await s.req('GET', '/char/x/profile');
   assert.match(html.text, /<div id="app">/);

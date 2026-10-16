@@ -1004,6 +1004,7 @@ path.pan.ant { fill: color-mix(in srgb, var(--antagonism) 75%, var(--surface)); 
 .drop-overlay > div { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 36px; border: 2px dashed var(--accent); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); font-size: 16px; }
 .drop-overlay .ic { width: 34px; height: 34px; color: var(--accent); }
 .save-status[data-state='conflict'] { color: var(--warn); }
+.app-version { display: block; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 @media (max-width: 600px) {
   .xfer-item { flex-wrap: wrap; row-gap: 4px; }
   .xfer-item .xfer-name { flex: 1 1 150px; }

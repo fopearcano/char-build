@@ -1,6 +1,6 @@
 {
   "name": "char-build",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "Fictional character builder grounded in Robert McKee's CHARACTER — structured, visual, interactive, with an optional Claude-powered coach.",
   "type": "module",
   "private": true,
