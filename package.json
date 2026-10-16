@@ -1,0 +1,22 @@
+{
+  "name": "char-build",
+  "version": "1.0.0",
+  "description": "Fictional character builder grounded in Robert McKee's CHARACTER — structured, visual, interactive, with an optional Claude-powered coach.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "adm-zip": "^0.6.1",
+    "express": "^4.22.3",
+    "zod": "^4.6.7"
+  }
+}
